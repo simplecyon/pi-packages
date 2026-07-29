@@ -9,6 +9,7 @@ Compact, background-free rendering for Pi's built-in tool events.
 - A single action keeps its descriptive `·verb detail` row
 - Bash failures stay collapsed with a compact outcome such as `× timeout 30s` or `× exit 1`
 - `edit` stays outside action groups and keeps its native diff visible while collapsed
+- Collapsed edit diffs use high-contrast added/removed colors, one context line, and a single `…` between distant change groups
 - `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls` use a background-free self-rendered shell
 - `Ctrl+O` still expands and collapses tool details through Pi's native `expanded` state
 - Expanded output keeps Pi's built-in renderers, including diff, syntax highlighting, truncation notices, images, errors, and bash timing
@@ -19,6 +20,9 @@ The package deliberately does not simulate Thinking duration, automatic Thinking
 `write` is summarized as a file operation rather than presented as a diff. Pi's
 write result does not include the previous file content, so the package does not
 invent an inaccurate before/after view.
+
+The compact diff is only used while tool output is collapsed. `Ctrl+O` restores
+Pi's complete native diff, including its wider context and intra-line emphasis.
 
 ## Install in Pi
 

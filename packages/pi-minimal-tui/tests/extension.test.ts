@@ -199,7 +199,7 @@ test("bash timeout stays collapsed and annotates the call summary", () => {
 	assert.deepEqual(result?.render(80), []);
 });
 
-test("a real edit preview keeps its native diff visible while collapsed", async () => {
+test("a completed edit uses the compact diff while collapsed", async () => {
 	initTheme("dark");
 	const cwd = await mkdtemp(join(tmpdir(), "pi-minimal-tui-edit-"));
 	try {
@@ -244,12 +244,21 @@ test("a real edit preview keeps its native diff visible while collapsed", async 
 		const component = edit.renderCall?.(args, theme, context as any);
 		await invalidated;
 		const updated = edit.renderCall?.(args, theme, { ...context, lastComponent: component } as any);
-		const rendered = updated?.render(100) ?? [];
-		const plain = rendered.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
+		assert.deepEqual(updated?.render(100), ["·edit sample.ts"]);
 
-		assert.equal(plain[0], "·edit sample.ts");
-		assert.ok(plain.some((line) => line.includes("-1 const value = 1;")));
-		assert.ok(plain.some((line) => line.includes("+1 const value = 2;")));
+		const result = edit.renderResult?.(
+			{
+				content: [{ type: "text", text: "Successfully replaced 1 block(s) in sample.ts." }],
+				details: {
+					diff: "-1 const value = 1;\n+1 const value = 2;",
+					firstChangedLine: 1,
+				},
+			},
+			{ expanded: false, isPartial: false },
+			theme,
+			{ ...context, lastComponent: undefined } as any,
+		);
+		assert.deepEqual(result?.render(100), ["  -1 const value = 1;", "  +1 const value = 2;"]);
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}

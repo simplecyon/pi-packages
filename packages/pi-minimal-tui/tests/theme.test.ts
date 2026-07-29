@@ -17,4 +17,8 @@ test("highlights user messages without restoring event backgrounds", async () =>
 	assert.equal(theme.colors.toolPendingBg, "");
 	assert.equal(theme.colors.toolSuccessBg, "");
 	assert.equal(theme.colors.toolErrorBg, "");
+	assert.equal(theme.vars.diffGreen, "#7ee787");
+	assert.equal(theme.vars.diffRed, "#ff7b72");
+	assert.equal(theme.colors.toolDiffAdded, "diffGreen");
+	assert.equal(theme.colors.toolDiffRemoved, "diffRed");
 });

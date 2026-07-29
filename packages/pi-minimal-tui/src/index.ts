@@ -10,6 +10,7 @@ import {
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { CompactDiffComponent } from "./diff.ts";
 import { ActionGroupCoordinator } from "./grouping.ts";
 import { formatErrorOutcome } from "./outcome.ts";
 import { formatToolSummary } from "./summary.ts";
@@ -31,6 +32,12 @@ function textResult(result: { content: Array<{ type: string; text?: string }> })
 	return output ? new Text(output, 0, 0) : undefined;
 }
 
+function editDiff(result: { details?: unknown }): string | undefined {
+	if (!result.details || typeof result.details !== "object") return undefined;
+	const diff = (result.details as Record<string, unknown>).diff;
+	return typeof diff === "string" && diff.trim() ? diff : undefined;
+}
+
 function decorateTool(base: ToolDefinition, grouping: ActionGroupCoordinator): ToolDefinition {
 	const originalRenderCall = base.renderCall;
 	const originalRenderResult = base.renderResult;
@@ -48,7 +55,7 @@ function decorateTool(base: ToolDefinition, grouping: ActionGroupCoordinator): T
 			const options = {
 				getGroupView: () => grouping.getView(context.toolCallId),
 				outcome: state.outcome,
-				showInnerCollapsed: base.name === "edit" && !context.isError,
+				showInnerCollapsed: false,
 			};
 
 			const component =
@@ -67,6 +74,8 @@ function decorateTool(base: ToolDefinition, grouping: ActionGroupCoordinator): T
 			state.resultInner = inner;
 			state.outcome = !options.isPartial && context.isError ? formatErrorOutcome(result) : undefined;
 			grouping.markError(context.toolCallId, !options.isPartial && context.isError);
+			const diff = base.name === "edit" && !context.isError ? editDiff(result) : undefined;
+			const visibleInner = !options.expanded && diff ? new CompactDiffComponent(diff, theme) : inner;
 			state.minimalCall?.update(
 				formatToolSummary(base.name, context.args),
 				state.callInner,
@@ -75,16 +84,16 @@ function decorateTool(base: ToolDefinition, grouping: ActionGroupCoordinator): T
 				{
 					getGroupView: () => grouping.getView(context.toolCallId),
 					outcome: state.outcome,
-					showInnerCollapsed: base.name === "edit" && !context.isError,
+					showInnerCollapsed: false,
 				},
 			);
 
-			const visible = context.expanded || (base.name === "edit" && !context.isError);
+			const visible = context.expanded || Boolean(diff);
 			const component =
 				context.lastComponent instanceof MinimalToolResultComponent
 					? context.lastComponent
-					: new MinimalToolResultComponent(inner, visible);
-			component.update(inner, visible);
+					: new MinimalToolResultComponent(visibleInner, visible);
+			component.update(visibleInner, visible);
 			return component;
 		},
 	};
