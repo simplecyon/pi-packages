@@ -55,3 +55,22 @@ The user-level context-mode package may be removed only after:
    interactive smoke test;
 5. `pi list` and loaded-resource output contain no context-mode package or skill;
 6. the project remains usable if the legacy directory is retained read-only.
+
+## Cutover evidence
+
+Completed on 2026-07-29 for the Cyon Obsidian project:
+
+- all workspace checks and Pi resource-loader integration tests passed with 11
+  aggregate extensions;
+- migration v2 copied 672 non-empty session events and 5 indexed records (677
+  legacy records total), while retaining `~/.pi/context-mode/`;
+- a fresh local Pi runtime retrieved both migrated records and durable
+  `pi-context-compact` history;
+- real post-restart Pi calls passed for `context_run`, `context_index`, and
+  `context_search`;
+- `pi list`, the RPC command inventory, and skill inventory contained no
+  context-mode package, `ctx-*` command, or context-mode skill;
+- `/context-doctor` reported every replacement gate as complete;
+- active schema overhead fell from approximately 30 tools / 11.0k tokens before
+  cutover to 21 tools / 4.6k tokens after cutover, a reduction of approximately
+  6.4k schema tokens per model request in this project.
