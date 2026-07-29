@@ -13,6 +13,13 @@ within one artifact.
 Repeated large results with the same redacted content reuse the existing
 artifact instead of writing another copy.
 
+Pi's built-in Bash tool keeps a full temporary output file before returning its
+bounded tail. For a genuine Pi Bash truncation, this extension validates the
+temporary path, size, file type, and original byte count, then sends the full
+text through the same safe-operation redaction bridge before artifact
+persistence. If validation, recovery, redaction, or storage fails, Pi's original
+truncated result and recovery path remain unchanged.
+
 Artifact creation remains disabled unless `@simplecyon/pi-safe-operation`
 announces that tool-result redaction is active. Installing this package alone
 therefore cannot silently persist unredacted output.

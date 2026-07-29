@@ -2,6 +2,9 @@ import {
 	estimateTextTokens,
 	TOKEN_ROI_ARTIFACT_EVENT,
 } from "@simplecyon/pi-context-core";
+import { lstat, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, resolve } from "node:path";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -25,7 +28,10 @@ import type {
 
 const SAFE_CAPABILITY_DISCOVER = "simplecyon:safe-operation:discover";
 const SAFE_CAPABILITY_AVAILABLE = "simplecyon:safe-operation:available";
+const SAFE_REDACT_REQUEST = "simplecyon:safe-operation:redact";
 const RETRIEVAL_TOOL = "artifact_read";
+const MAX_BASH_SOURCE_BYTES = 32 * 1024 * 1024;
+const PI_BASH_TEMP_FILE = /^pi-bash-[a-f0-9]{16}\.log$/;
 
 interface ArtifactReadDetails {
 	found: boolean;
@@ -63,6 +69,76 @@ function isSafeCapability(value: unknown): boolean {
 	);
 }
 
+interface BashTruncationDetails {
+	fullOutputPath?: unknown;
+	truncation?: {
+		truncated?: unknown;
+		totalBytes?: unknown;
+	};
+}
+
+function bashFullOutputCandidate(details: unknown): {
+	path: string;
+	estimatedTokens: number;
+} | null {
+	if (!details || typeof details !== "object") return null;
+	const value = details as BashTruncationDetails;
+	if (value.truncation?.truncated !== true) return null;
+	if (
+		typeof value.fullOutputPath !== "string" ||
+		typeof value.truncation.totalBytes !== "number" ||
+		!Number.isFinite(value.truncation.totalBytes) ||
+		value.truncation.totalBytes <= 0
+	) {
+		return null;
+	}
+	const sourcePath = resolve(value.fullOutputPath);
+	const tempRoot = resolve(tmpdir());
+	if (
+		dirname(sourcePath) !== tempRoot ||
+		!PI_BASH_TEMP_FILE.test(basename(sourcePath))
+	) {
+		return null;
+	}
+	return {
+		path: sourcePath,
+		estimatedTokens: Math.ceil(value.truncation.totalBytes / 4),
+	};
+}
+
+async function recoverSafeBashOutput(
+	pi: ExtensionAPI,
+	candidate: { path: string; estimatedTokens: number },
+): Promise<TextBlock[] | null> {
+	const source = await lstat(candidate.path);
+	if (!source.isFile() || source.isSymbolicLink()) return null;
+	if (source.size <= 0 || source.size > MAX_BASH_SOURCE_BYTES) return null;
+	const raw = await readFile(candidate.path, "utf8");
+	const request = {
+		value: {
+			content: [{ type: "text" as const, text: raw }],
+		},
+		phase: "final" as const,
+	};
+	pi.events.emit(SAFE_REDACT_REQUEST, request);
+	if (!request.value || typeof request.value !== "object") return null;
+	const content = (request.value as { content?: unknown }).content;
+	if (
+		!Array.isArray(content) ||
+		content.length !== 1 ||
+		!content[0] ||
+		typeof content[0] !== "object" ||
+		(content[0] as { type?: unknown }).type !== "text" ||
+		typeof (content[0] as { text?: unknown }).text !== "string"
+	) {
+		return null;
+	}
+	return [{
+		type: "text",
+		text: (content[0] as { text: string }).text,
+	}];
+}
+
 export default function contextArtifactsExtension(pi: ExtensionAPI): void {
 	const policy = loadPolicy();
 	let safetyReady = false;
@@ -73,6 +149,7 @@ export default function contextArtifactsExtension(pi: ExtensionAPI): void {
 	let tokensSaved = 0;
 	let archiveFailures = 0;
 	let reusedArtifacts = 0;
+	let recoveredBashResults = 0;
 
 	function setRetrievalActive(active: boolean): void {
 		const current = pi.getActiveTools();
@@ -179,6 +256,7 @@ export default function contextArtifactsExtension(pi: ExtensionAPI): void {
 		tokensSaved = 0;
 		archiveFailures = 0;
 		reusedArtifacts = 0;
+		recoveredBashResults = 0;
 		setRetrievalActive(artifacts.size > 0);
 	});
 
@@ -194,17 +272,56 @@ export default function contextArtifactsExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("tool_result", async (event, ctx) => {
-		const decision = decideArtifact(
+		const contextPercent = ctx.getContextUsage()?.percent;
+		let content = event.content as TextBlock[];
+		let decision = decideArtifact(
 			event.toolName,
-			event.content,
+			content,
 			event.isError,
-			ctx.getContextUsage()?.percent,
+			contextPercent,
 			policy,
 			safetyReady,
 		);
+		let recoveredBash = false;
+		const bashCandidate = event.toolName === "bash"
+			? bashFullOutputCandidate(event.details)
+			: null;
+		if (bashCandidate) {
+			const preflight = decideArtifact(
+				event.toolName,
+				content,
+				event.isError,
+				contextPercent,
+				policy,
+				safetyReady,
+				bashCandidate.estimatedTokens,
+			);
+			if (preflight.archive) {
+				try {
+					const recovered = await recoverSafeBashOutput(pi, bashCandidate);
+					if (!recovered) {
+						archiveFailures++;
+						return;
+					}
+					content = recovered;
+					decision = decideArtifact(
+						event.toolName,
+						content,
+						event.isError,
+						contextPercent,
+						policy,
+						safetyReady,
+					);
+					if (!decision.archive) return;
+					recoveredBash = true;
+				} catch {
+					archiveFailures++;
+					return;
+				}
+			}
+		}
 		if (!decision.archive) return;
 		try {
-			const content = event.content as TextBlock[];
 			const activeSessionRef = currentSessionRef || sessionRef(ctx);
 			const copiedContent = content.map((block) => ({ type: "text" as const, text: block.text }));
 			const contentHash = hashTextBlocks(copiedContent);
@@ -219,6 +336,7 @@ export default function contextArtifactsExtension(pi: ExtensionAPI): void {
 			artifacts.set(artifact.id, artifact);
 			artifactsByHash.set(artifact.sha256, artifact);
 			if (existing) reusedArtifacts++;
+			if (recoveredBash) recoveredBashResults++;
 			setRetrievalActive(true);
 			const preview = buildArtifactPreview(content, artifact.id, decision.originalTokens, policy);
 			const visibleTokens = estimateTextTokens(preview);
@@ -254,6 +372,7 @@ export default function contextArtifactsExtension(pi: ExtensionAPI): void {
 					`session artifacts: ${artifacts.size}`,
 					`archived this run: ${archivedResults}`,
 					`duplicate results reused: ${reusedArtifacts}`,
+					`full Bash outputs recovered before Pi truncation: ${recoveredBashResults}`,
 					`archive failures (original preserved): ${archiveFailures}`,
 					`estimated context tokens saved this run: ${tokensSaved}`,
 					`retrieval tool: ${artifacts.size > 0 ? "active" : "inactive"}`,

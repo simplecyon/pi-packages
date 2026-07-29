@@ -38,8 +38,13 @@ export function decideArtifact(
 	contextPercent: number | null | undefined,
 	policy: ArtifactPolicy,
 	safetyReady: boolean,
+	originalTokensOverride?: number,
 ): ArtifactDecision {
-	const originalTokens = estimateContentTokens(content);
+	const estimatedTokens = estimateContentTokens(content);
+	const originalTokens = Math.max(
+		estimatedTokens,
+		Math.floor(originalTokensOverride ?? 0),
+	);
 	if (!safetyReady) return { archive: false, reason: "safety-unavailable", originalTokens };
 	if (isError) return { archive: false, reason: "error-result", originalTokens };
 	if (INTERNAL_TOOLS.has(toolName)) return { archive: false, reason: "recovery-tool", originalTokens };

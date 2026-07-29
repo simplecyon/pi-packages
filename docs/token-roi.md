@@ -158,7 +158,9 @@ Automated replay gates:
 6. errors, images, and recovery results are never archived;
 7. persistence failure leaves the original result unchanged;
 8. retrieval schemas are absent until their backing data exists;
-9. all aggregate and independent Pi packages load without resource errors.
+9. Pi's real built-in Bash truncation path is recovered before artifact
+   persistence, with the full source redacted again and tool arguments omitted;
+10. all aggregate and independent Pi packages load without resource errors.
 
 Human A/B remains required before declaring model-level task equivalence because
 replay tests cannot prove that a model will avoid unnecessary retrieval turns.
@@ -192,8 +194,9 @@ After restarting Pi in the vault:
    ```
 
 4. Confirm the result is a bounded preview with an `art_...` ID. `/artifacts`
-   should report one artifact and an active retrieval tool; `/roi` should report
-   positive artifact token savings.
+   should report one artifact, one full Bash output recovered before Pi
+   truncation, and an active retrieval tool; `/roi` should report positive
+   artifact token savings.
 5. Ask the agent to use `artifact_read` to search that artifact for
    `END-MANUAL-ROI`. Confirm it recovers the tail marker.
 6. Repeat the same Bash fixture. Confirm the session artifact count stays at one

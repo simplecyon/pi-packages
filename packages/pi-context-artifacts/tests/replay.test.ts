@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -11,6 +11,7 @@ import type {
 	ExtensionContext,
 	ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
 import safeOperation from "../../pi-safe-operation/src/index.ts";
 import contextArtifactsExtension from "../src/index.ts";
 import { listArtifacts, readArtifact } from "../src/storage.ts";
@@ -123,4 +124,51 @@ test("replay: safe-operation redacts before artifact persistence and preview cut
 	assert.match(stored, /BEGIN/);
 	assert.match(stored, /END/);
 	assert.equal(record?.sha256.length, 64);
+
+	const bashSecret = "sk-bashsecret1234567890ABCDEFG";
+	const bashScript =
+		`process.stdout.write("API_KEY=${bashSecret}\\nBEGIN-BASH-FULL\\n"` +
+		`+"bash output line\\n".repeat(8000)+"END-BASH-FULL\\n")`;
+	const builtinBash = createBashToolDefinition(root);
+	const builtinResult = await builtinBash.execute(
+		"builtin-bash",
+		{
+			command:
+				`${JSON.stringify(process.execPath)} -e ${JSON.stringify(bashScript)}`,
+		},
+		undefined,
+		undefined,
+		ctx,
+	);
+	const bashDetails = builtinResult.details as {
+		truncation?: { truncated?: boolean; totalBytes?: number };
+		fullOutputPath?: string;
+	};
+	assert.equal(bashDetails.truncation?.truncated, true);
+	assert.ok(bashDetails.fullOutputPath);
+	t.after(() => unlink(bashDetails.fullOutputPath!).catch(() => {}));
+	event = {
+		type: "tool_result",
+		toolName: "bash",
+		toolCallId: "replay-bash",
+		input: { command: "private command must not be retained" },
+		content: builtinResult.content,
+		details: builtinResult.details,
+		isError: false,
+	};
+	for (const handler of handlers.get("tool_result") ?? []) {
+		const result = await handler(event, ctx) as any;
+		if (result) event = { ...event, ...result };
+	}
+	assert.match(event.content[0].text, /Large tool result archived as/);
+	const bashArtifact = (await listArtifacts("/sessions/replay.jsonl"))
+		.find((artifact) => artifact.toolName === "bash");
+	assert.ok(bashArtifact);
+	const bashRecord = await readArtifact("/sessions/replay.jsonl", bashArtifact.id);
+	const storedBash = bashRecord?.content.map((block) => block.text).join("\n") ?? "";
+	assert.match(storedBash, /BEGIN-BASH-FULL/);
+	assert.match(storedBash, /END-BASH-FULL/);
+	assert.doesNotMatch(storedBash, new RegExp(bashSecret));
+	assert.match(storedBash, /<redacted:/);
+	assert.equal(JSON.stringify(bashRecord).includes("private command"), false);
 });
