@@ -30,8 +30,9 @@ Compact, low-noise rendering for Pi's built-in tool events, plus the
   diffs.
 - `cyon-minimal-dark` gives user messages a subtle cool-gray highlight while
   keeping tool and custom-message surfaces quiet. User-message highlights omit
-  Pi's default blank row above and below the content for a denser one-line bar,
-  add a dim `> ` gutter, and use the same medium-weight approximation as events.
+  Pi's default blank row above the content while retaining one bottom padding
+  row, add a dim `> ` gutter, and use the same medium-weight approximation as
+  events. Primary text is pure white for stronger dark-theme contrast.
 
 `write` is summarized as a file operation rather than shown as an invented
 diff: Pi's write result does not contain the previous file content.
