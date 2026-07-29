@@ -164,7 +164,12 @@ test("gates persistence on redaction capability and dynamically activates exact 
 		undefined,
 		ctx,
 	);
-	assert.match((searched.content[0] as { text: string }).text, /1 match/);
+	const searchedText = (searched.content[0] as { text: string }).text;
+	assert.match(searchedText, /1 match/);
+	assert.match(
+		searchedText,
+		new RegExp(`match at char ${source.length - 3}; context chars`),
+	);
 	assert.deepEqual((searched.details as { matchOffsets: number[] }).matchOffsets, [source.length - 3]);
 
 	process.env.PI_CONTEXT_ARTIFACTS_DIR = "/dev/null/not-a-directory";

@@ -204,7 +204,10 @@ export default function contextArtifactsExtension(pi: ExtensionAPI): void {
 				const snippets = matchOffsets.map((match, index) => {
 					const start = Math.max(0, match - 240);
 					const end = Math.min(full.length, match + needle.length + 240);
-					return `[${index + 1}] chars ${start}-${end}\n${full.slice(start, end)}`;
+					return (
+						`[${index + 1}] match at char ${match}; context chars ${start}-${end}\n` +
+						full.slice(start, end)
+					);
 				});
 				return {
 					content: [{
