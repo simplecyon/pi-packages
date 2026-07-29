@@ -7,6 +7,12 @@ import { initTheme, type ExtensionAPI, type Theme, type ToolDefinition } from "@
 import { ActionGroupCoordinator } from "../src/grouping.ts";
 import minimalTuiExtension, { createMinimalToolDefinitions } from "../src/index.ts";
 
+const ANSI_PATTERN = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g;
+
+function plain(text: string): string {
+	return text.replace(ANSI_PATTERN, "");
+}
+
 test("registers all built-in tools with self-rendered shells", () => {
 	const tools: Array<{ name: string; renderShell?: string }> = [];
 	const pi = {
@@ -258,7 +264,7 @@ test("a completed edit uses the compact diff while collapsed", async () => {
 			theme,
 			{ ...context, lastComponent: undefined } as any,
 		);
-		assert.deepEqual(result?.render(100), ["  -1 const value = 1;", "  +1 const value = 2;"]);
+		assert.deepEqual(result?.render(100).map(plain), ["  -1 const value = 1;", "  +1 const value = 2;"]);
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}

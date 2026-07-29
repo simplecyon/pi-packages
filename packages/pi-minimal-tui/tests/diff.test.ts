@@ -59,14 +59,14 @@ test("compact diff uses low-luminance semantic backgrounds in dark themes", () =
 		rendered.some(
 			(line) =>
 				line ===
-				"\x1b[48;2;74;45;48m<toolDiffRemoved>-2 const oldA = true;</toolDiffRemoved>\x1b[49m",
+				"\x1b[48;2;74;45;48m<toolDiffRemoved>-2 </toolDiffRemoved><text>const oldA = true;</text>\x1b[49m",
 		),
 	);
 	assert.ok(
 		rendered.some(
 			(line) =>
 				line ===
-				"\x1b[48;2;46;69;53m<toolDiffAdded>+2 const newA = true;</toolDiffAdded>\x1b[49m",
+				"\x1b[48;2;46;69;53m<toolDiffAdded>+2 </toolDiffAdded><text>const newA = true;</text>\x1b[49m",
 		),
 	);
 	assert.ok(rendered.includes("<dim>  …</dim>"));
@@ -79,14 +79,14 @@ test("compact diff uses high-luminance semantic backgrounds in light themes", ()
 		rendered.some(
 			(line) =>
 				line ===
-				"\x1b[48;2;232;222;227m<toolDiffRemoved>-2 const oldA = true;</toolDiffRemoved>\x1b[49m",
+				"\x1b[48;2;232;222;227m<toolDiffRemoved>-2 </toolDiffRemoved><text>const oldA = true;</text>\x1b[49m",
 		),
 	);
 	assert.ok(
 		rendered.some(
 			(line) =>
 				line ===
-				"\x1b[48;2;223;228;227m<toolDiffAdded>+2 const newA = true;</toolDiffAdded>\x1b[49m",
+				"\x1b[48;2;223;228;227m<toolDiffAdded>+2 </toolDiffAdded><text>const newA = true;</text>\x1b[49m",
 		),
 	);
 });

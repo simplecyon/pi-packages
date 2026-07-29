@@ -1,4 +1,4 @@
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import { getLanguageFromPath, highlightCode, type Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 
 export type CompactDiffLineKind = "added" | "removed" | "context" | "omission";
@@ -112,6 +112,17 @@ function semanticBackground(
 	return `${ansi}${text}\x1b[49m`;
 }
 
+function splitDisplayRow(text: string): { gutter: string; code: string } | undefined {
+	const match = text.match(/^([+\-\s]\s*\d*\s)(.*)$/);
+	return match ? { gutter: match[1] ?? "", code: match[2] ?? "" } : undefined;
+}
+
+function renderCode(code: string, filePath: string | undefined, theme: Theme): string {
+	const language = filePath ? getLanguageFromPath(filePath) : undefined;
+	if (!language) return theme.fg("text", code);
+	return highlightCode(code, language)[0] ?? theme.fg("text", code);
+}
+
 function parseDiffLine(line: string): CompactDiffLine {
 	const match = line.match(/^([+\-\s])(\s*\d*)\s(.*)$/);
 	if (!match) return { kind: "context", text: line };
@@ -164,35 +175,47 @@ export function compactDiffLines(diffText: string, contextLines = 1): CompactDif
 	return compacted;
 }
 
-function colorLine(line: CompactDiffLine, theme: Theme): string {
+function colorLine(line: CompactDiffLine, theme: Theme, filePath: string | undefined): string {
+	const row = splitDisplayRow(line.text);
 	switch (line.kind) {
-		case "added":
-			return semanticBackground(theme, "toolDiffAdded", theme.fg("toolDiffAdded", line.text));
-		case "removed":
-			return semanticBackground(theme, "toolDiffRemoved", theme.fg("toolDiffRemoved", line.text));
+		case "added": {
+			if (!row) return semanticBackground(theme, "toolDiffAdded", theme.fg("text", line.text));
+			const content = theme.fg("toolDiffAdded", row.gutter) + renderCode(row.code, filePath, theme);
+			return semanticBackground(theme, "toolDiffAdded", content);
+		}
+		case "removed": {
+			if (!row) return semanticBackground(theme, "toolDiffRemoved", theme.fg("text", line.text));
+			const content = theme.fg("toolDiffRemoved", row.gutter) + renderCode(row.code, filePath, theme);
+			return semanticBackground(theme, "toolDiffRemoved", content);
+		}
 		case "omission":
 			return theme.fg("dim", line.text);
-		default:
-			return theme.fg("toolDiffContext", line.text);
+		default: {
+			if (!row) return theme.fg("toolDiffContext", line.text);
+			return theme.fg("toolDiffContext", row.gutter) + renderCode(row.code, filePath, theme);
+		}
 	}
 }
 
 export class CompactDiffComponent implements Component {
 	private diffText: string;
 	private theme: Theme;
+	private filePath: string | undefined;
 
-	constructor(diffText: string, theme: Theme) {
+	constructor(diffText: string, theme: Theme, filePath?: string) {
 		this.diffText = diffText;
 		this.theme = theme;
+		this.filePath = filePath;
 	}
 
-	update(diffText: string, theme: Theme): void {
+	update(diffText: string, theme: Theme, filePath?: string): void {
 		this.diffText = diffText;
 		this.theme = theme;
+		this.filePath = filePath;
 	}
 
 	render(): string[] {
-		return compactDiffLines(this.diffText).map((line) => colorLine(line, this.theme));
+		return compactDiffLines(this.diffText).map((line) => colorLine(line, this.theme, this.filePath));
 	}
 
 	invalidate(): void {}

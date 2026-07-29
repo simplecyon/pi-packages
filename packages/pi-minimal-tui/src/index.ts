@@ -38,6 +38,12 @@ function editDiff(result: { details?: unknown }): string | undefined {
 	return typeof diff === "string" && diff.trim() ? diff : undefined;
 }
 
+function toolPath(args: unknown): string | undefined {
+	if (!args || typeof args !== "object") return undefined;
+	const path = (args as Record<string, unknown>).path;
+	return typeof path === "string" ? path : undefined;
+}
+
 function decorateTool(base: ToolDefinition, grouping: ActionGroupCoordinator): ToolDefinition {
 	const originalRenderCall = base.renderCall;
 	const originalRenderResult = base.renderResult;
@@ -75,7 +81,8 @@ function decorateTool(base: ToolDefinition, grouping: ActionGroupCoordinator): T
 			state.outcome = !options.isPartial && context.isError ? formatErrorOutcome(result) : undefined;
 			grouping.markError(context.toolCallId, !options.isPartial && context.isError);
 			const diff = base.name === "edit" && !context.isError ? editDiff(result) : undefined;
-			const visibleInner = !options.expanded && diff ? new CompactDiffComponent(diff, theme) : inner;
+			const visibleInner =
+				!options.expanded && diff ? new CompactDiffComponent(diff, theme, toolPath(context.args)) : inner;
 			state.minimalCall?.update(
 				formatToolSummary(base.name, context.args),
 				state.callInner,
