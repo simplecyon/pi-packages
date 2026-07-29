@@ -53,9 +53,10 @@ function trimEmptyEdges(lines: string[]): string[] {
 	return lines.slice(start, end);
 }
 
-function indentLine(line: string, width: number): string {
-	if (width <= 2) return truncateToWidth(stripBackgroundAnsi(line), width);
-	return truncateToWidth(`  ${stripBackgroundAnsi(line)}`, width);
+function indentLine(line: string, width: number, preserveBackground = false): string {
+	const rendered = preserveBackground ? line : stripBackgroundAnsi(line);
+	if (width <= 2) return truncateToWidth(rendered, width);
+	return truncateToWidth(`  ${rendered}`, width);
 }
 
 function summaryLine(summary: ToolSummary, theme: Theme, width: number, outcome?: string): string {
@@ -134,21 +135,25 @@ export class MinimalToolCallComponent implements Component {
 export class MinimalToolResultComponent implements Component {
 	private inner: Component | undefined;
 	private visible: boolean;
+	private preserveBackground: boolean;
 
-	constructor(inner: Component | undefined, visible: boolean) {
+	constructor(inner: Component | undefined, visible: boolean, preserveBackground = false) {
 		this.inner = inner;
 		this.visible = visible;
+		this.preserveBackground = preserveBackground;
 	}
 
-	update(inner: Component | undefined, visible: boolean): void {
+	update(inner: Component | undefined, visible: boolean, preserveBackground = false): void {
 		this.inner = inner;
 		this.visible = visible;
+		this.preserveBackground = preserveBackground;
 	}
 
 	render(width: number): string[] {
 		if (!this.visible || !this.inner || width <= 0) return [];
-		const rendered = trimEmptyEdges(this.inner.render(Math.max(1, width - 2)).map(stripBackgroundAnsi));
-		return rendered.map((line) => indentLine(line, width));
+		const sanitize = this.preserveBackground ? (line: string) => line : stripBackgroundAnsi;
+		const rendered = trimEmptyEdges(this.inner.render(Math.max(1, width - 2)).map(sanitize));
+		return rendered.map((line) => indentLine(line, width, this.preserveBackground));
 	}
 
 	invalidate(): void {

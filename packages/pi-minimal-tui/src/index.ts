@@ -89,11 +89,12 @@ function decorateTool(base: ToolDefinition, grouping: ActionGroupCoordinator): T
 			);
 
 			const visible = context.expanded || Boolean(diff);
+			const preserveBackground = !context.expanded && Boolean(diff);
 			const component =
 				context.lastComponent instanceof MinimalToolResultComponent
 					? context.lastComponent
-					: new MinimalToolResultComponent(visibleInner, visible);
-			component.update(visibleInner, visible);
+					: new MinimalToolResultComponent(visibleInner, visible, preserveBackground);
+			component.update(visibleInner, visible, preserveBackground);
 			return component;
 		},
 	};

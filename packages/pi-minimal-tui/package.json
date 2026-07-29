@@ -1,8 +1,8 @@
 {
   "name": "@simplecyon/pi-minimal-tui",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
-  "description": "Compact, background-free TUI rendering for Pi built-in tools",
+  "description": "Compact, low-noise TUI rendering for Pi built-in tools",
   "keywords": [
     "pi-package",
     "pi-extension",

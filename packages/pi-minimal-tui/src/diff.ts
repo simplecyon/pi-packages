@@ -63,9 +63,9 @@ export function compactDiffLines(diffText: string, contextLines = 1): CompactDif
 function colorLine(line: CompactDiffLine, theme: Theme): string {
 	switch (line.kind) {
 		case "added":
-			return theme.fg("toolDiffAdded", line.text);
+			return theme.bg("selectedBg", theme.fg("toolDiffAdded", line.text));
 		case "removed":
-			return theme.fg("toolDiffRemoved", line.text);
+			return theme.bg("selectedBg", theme.fg("toolDiffRemoved", line.text));
 		case "omission":
 			return theme.fg("dim", line.text);
 		default:

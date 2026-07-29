@@ -104,6 +104,18 @@ test("result stays hidden while collapsed except when caller marks it visible", 
 	assert.deepEqual(component.render(80), ["  output", "  done"]);
 });
 
+test("result preserves an explicitly allowed compact diff background", () => {
+	const background = "\x1b[48;2;40;40;50m";
+	const reset = "\x1b[49m";
+	const inner = new StaticComponent([`${background}-1 old${reset}`, `${background}+1 new${reset}`]);
+	const component = new MinimalToolResultComponent(inner, true, true);
+
+	assert.deepEqual(component.render(80), [
+		`  ${background}-1 old${reset}`,
+		`  ${background}+1 new${reset}`,
+	]);
+});
+
 test("rendered rows respect the requested width", () => {
 	const component = new MinimalToolCallComponent(
 		{ verb: "bash", detail: "a very long command that must be clipped" },
