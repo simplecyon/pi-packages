@@ -24,6 +24,7 @@
       "./packages/pi-ask-user-question/src/index.ts",
       "./packages/pi-safe-operation/src/index.ts",
       "./packages/pi-context-artifacts/src/index.ts",
+      "./packages/pi-context-engine/src/index.ts",
       "./packages/pi-token-roi/src/index.ts",
       "./packages/pi-minimal-tui/src/index.ts",
       "./packages/pi-memory/src/index.ts",

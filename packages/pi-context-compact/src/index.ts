@@ -18,11 +18,25 @@ import {
 	type HistorySegment,
 } from "./types.ts";
 
+const CONTEXT_ENGINE_COMPACT_SEARCH = "simplecyon:context-engine:compact-search";
+
+interface ContextEngineCompactSearchRequest {
+	query?: unknown;
+	limit?: unknown;
+	searches?: unknown;
+}
+
 function currentSessionRef(
 	ctx: Pick<ExtensionContext, "cwd" | "sessionManager">,
 	ephemeralSessionId: string,
 ): string {
-	return ctx.sessionManager.getSessionFile() ?? `ephemeral:${ctx.cwd}:${ephemeralSessionId}`;
+	const manager = ctx.sessionManager as typeof ctx.sessionManager & {
+		getSessionFile?: () => string | undefined;
+		getSessionId?: () => string | undefined;
+	};
+	return manager.getSessionFile?.() ??
+		manager.getSessionId?.() ??
+		`ephemeral:${ctx.cwd}:${ephemeralSessionId}`;
 }
 
 function searchSummary(query: string): string {
@@ -39,6 +53,7 @@ function formatTokenCount(value: number): string {
 
 export default function contextCompactExtension(pi: ExtensionAPI): void {
 	let ephemeralSessionId = randomUUID();
+	let activeSessionRef = "";
 
 	function hasOwnedCompaction(ctx: ExtensionContext): boolean {
 		return ctx.sessionManager.getBranch().some((entry) => {
@@ -60,10 +75,29 @@ export default function contextCompactExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", (_event, ctx) => {
 		ephemeralSessionId = randomUUID();
+		activeSessionRef = currentSessionRef(ctx, ephemeralSessionId);
 		setSearchActive(hasOwnedCompaction(ctx));
 	});
 	pi.on("session_tree", (_event, ctx) => {
+		activeSessionRef = currentSessionRef(ctx, ephemeralSessionId);
 		setSearchActive(hasOwnedCompaction(ctx));
+	});
+	pi.events.on(CONTEXT_ENGINE_COMPACT_SEARCH, (data) => {
+		if (!data || typeof data !== "object" || !activeSessionRef) return;
+		const request = data as ContextEngineCompactSearchRequest;
+		if (
+			typeof request.query !== "string" ||
+			!Array.isArray(request.searches)
+		) {
+			return;
+		}
+		const limit =
+			typeof request.limit === "number" && Number.isFinite(request.limit)
+				? Math.max(1, Math.min(Math.floor(request.limit), 20))
+				: 5;
+		request.searches.push(
+			searchHistory(activeSessionRef, request.query, limit),
+		);
 	});
 	pi.registerTool({
 		name: "compact_search",
@@ -118,6 +152,7 @@ export default function contextCompactExtension(pi: ExtensionAPI): void {
 			if (messages.length === 0) return;
 
 			const sessionRef = currentSessionRef(ctx, ephemeralSessionId);
+			activeSessionRef = sessionRef;
 			const segmentId = randomUUID();
 			const createdAt = new Date().toISOString();
 			const segment: HistorySegment = {

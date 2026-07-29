@@ -12,6 +12,7 @@ Cyon's package-only extensions and themes for
 | [`packages/pi-memory`](packages/pi-memory) | `@simplecyon/pi-memory` | Cache-stable memory injection with scope-aware progressive disclosure |
 | [`packages/pi-safe-operation`](packages/pi-safe-operation) | `@simplecyon/pi-safe-operation` | Destructive-operation safety, recoverable deletion, and secret-egress redaction |
 | [`packages/pi-context-compact`](packages/pi-context-compact) | `@simplecyon/pi-context-compact` | Durable compaction checkpoints and cold-history search |
+| [`packages/pi-context-engine`](packages/pi-context-engine) | `@simplecyon/pi-context-engine` | Pi-native context execution, indexing, search, continuity, and legacy migration |
 | [`packages/pi-context-artifacts`](packages/pi-context-artifacts) | `@simplecyon/pi-context-artifacts` | Safety-gated bounded output with durable exact recovery |
 | [`packages/pi-context-inspector`](packages/pi-context-inspector) | `@simplecyon/pi-context-inspector` | `/context` diagnostics for prompt and conversation usage |
 | [`packages/pi-context-core`](packages/pi-context-core) | `@simplecyon/pi-context-core` | Model-invisible token accounting and context primitives |
@@ -34,6 +35,7 @@ pi install npm:@simplecyon/pi-minimal-tui
 pi install npm:@simplecyon/pi-memory
 pi install npm:@simplecyon/pi-safe-operation
 pi install npm:@simplecyon/pi-context-compact
+pi install npm:@simplecyon/pi-context-engine
 pi install npm:@simplecyon/pi-context-artifacts
 pi install npm:@simplecyon/pi-context-inspector
 pi install npm:@simplecyon/pi-token-roi
@@ -63,14 +65,14 @@ For local development:
 pi install -l --approve /absolute/path/to/pi-packages
 ```
 
-The repository root is an aggregate Git package. Its manifest exposes all ten
+The repository root is an aggregate Git package. Its manifest exposes all eleven
 extensions and the bundled theme. `pi-context-core` is a library dependency and
 does not load as an extension. The npm packages are separate distribution units
 with independent manifests, versions, tests, and compatibility boundaries.
 
 After installation, restart Pi. Use `/theme` to select
 `cyon-minimal-dark`; package commands such as `/memory`, `/context`,
-`/artifacts`, `/roi`, `/tasks`, and `/skill-stats` become available
+`/context-engine`, `/context-doctor`, `/artifacts`, `/roi`, `/tasks`, and `/skill-stats` become available
 automatically.
 
 ## Requirements

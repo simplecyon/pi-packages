@@ -1,0 +1,55 @@
+{
+  "name": "@simplecyon/pi-context-engine",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Pi-native context execution, indexing, search, session continuity, and context-mode migration",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "context",
+    "search",
+    "continuity"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/simplecyon/pi-packages.git",
+    "directory": "packages/pi-context-engine"
+  },
+  "homepage": "https://github.com/simplecyon/pi-packages/tree/main/packages/pi-context-engine#readme",
+  "bugs": {
+    "url": "https://github.com/simplecyon/pi-packages/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.82.1 <0.83.0",
+    "typebox": ">=1.1.38 <2.0.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.82.1",
+    "@types/node": "^24.0.0",
+    "typebox": "1.1.38",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

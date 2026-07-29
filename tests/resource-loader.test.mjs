@@ -14,6 +14,7 @@ const workspaces = [
 	["pi-ask-user-question", 1, 0],
 	["pi-context-artifacts", 1, 0],
 	["pi-context-compact", 1, 0],
+	["pi-context-engine", 1, 0],
 	["pi-context-inspector", 1, 0],
 	["pi-memory", 1, 0],
 	["pi-minimal-tui", 1, 1],
@@ -52,10 +53,10 @@ test("Pi loads the aggregate package without duplicate or invalid resources", as
 	const themeResult = loader.getThemes();
 	assert.deepEqual(extensionResult.errors, []);
 	assert.deepEqual(themeResult.diagnostics, []);
-	assert.equal(extensionResult.extensions.length, 10);
+	assert.equal(extensionResult.extensions.length, 11);
 	assert.equal(
 		new Set(extensionResult.extensions.map((extension) => extension.path)).size,
-		10,
+		11,
 	);
 	assert.deepEqual(
 		themeResult.themes.map((theme) => theme.name),

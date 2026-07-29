@@ -13,6 +13,7 @@ on:
           - pi-memory
           - pi-safe-operation
           - pi-context-compact
+          - pi-context-engine
           - pi-context-artifacts
           - pi-context-core
           - pi-context-inspector

@@ -43,7 +43,7 @@ After a package exists on npm, configure its npm Trusted Publisher:
 - Workflow: `publish-package.yml`
 - Environment: `npm`
 
-Configure all eleven packages. The workflow uses GitHub OIDC and does not require a
+Configure all twelve packages. The workflow uses GitHub OIDC and does not require a
 long-lived `NPM_TOKEN`.
 
 ## Publishing a new version
@@ -72,6 +72,7 @@ The workflow refuses to publish a version that is already present on npm.
 | `pi-memory` | `@simplecyon/pi-memory` |
 | `pi-safe-operation` | `@simplecyon/pi-safe-operation` |
 | `pi-context-compact` | `@simplecyon/pi-context-compact` |
+| `pi-context-engine` | `@simplecyon/pi-context-engine` |
 | `pi-context-artifacts` | `@simplecyon/pi-context-artifacts` |
 | `pi-context-core` | `@simplecyon/pi-context-core` |
 | `pi-context-inspector` | `@simplecyon/pi-context-inspector` |
