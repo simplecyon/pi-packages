@@ -25,6 +25,9 @@ function createHarness(activeMessages: unknown[]) {
 	const commands = new Map<string, (...args: any[]) => unknown>();
 	const sent: SentMessage[] = [];
 	const emitted: string[] = [];
+	const entries: Array<{ customType: string; data: unknown }> = [];
+	const entryRenderers = new Map<string, (...args: any[]) => unknown>();
+	const messageRenderers = new Map<string, (...args: any[]) => unknown>();
 	const pi = {
 		on(name: string, handler: (...args: any[]) => unknown) {
 			const list = handlers.get(name) ?? [];
@@ -34,7 +37,15 @@ function createHarness(activeMessages: unknown[]) {
 		registerCommand(name: string, command: { handler: (...args: any[]) => unknown }) {
 			commands.set(name, command.handler);
 		},
-		registerMessageRenderer() {},
+		registerEntryRenderer(customType: string, renderer: (...args: any[]) => unknown) {
+			entryRenderers.set(customType, renderer);
+		},
+		registerMessageRenderer(customType: string, renderer: (...args: any[]) => unknown) {
+			messageRenderers.set(customType, renderer);
+		},
+		appendEntry(customType: string, data: unknown) {
+			entries.push({ customType, data });
+		},
 		sendMessage(message: SentMessage["message"], options: SentMessage["options"]) {
 			sent.push({ message, options });
 		},
@@ -48,7 +59,15 @@ function createHarness(activeMessages: unknown[]) {
 		},
 	} as unknown as ExtensionAPI;
 	memoryExtension(pi);
-	return { handlers, commands, sent, emitted };
+	return {
+		handlers,
+		commands,
+		sent,
+		emitted,
+		entries,
+		entryRenderers,
+		messageRenderers,
+	};
 }
 
 async function fire(
@@ -269,6 +288,105 @@ test("read disclosure is reused by later mutation and active context survives co
 		)) as { block: boolean };
 		assert.equal(afterRemoval.block, true);
 		assert.equal(harness.sent.length, 2);
+	} finally {
+		if (oldAgentDir === undefined) delete process.env.PI_MEMORY_AGENT_DIR;
+		else process.env.PI_MEMORY_AGENT_DIR = oldAgentDir;
+		fs.rmSync(root, { recursive: true, force: true });
+		fs.rmSync(agent, { recursive: true, force: true });
+	}
+});
+
+test("renders base and scoped memory reads as independent TUI events", async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-memory-render-"));
+	const agent = fs.mkdtempSync(path.join(os.tmpdir(), "pi-memory-agent-"));
+	const oldAgentDir = process.env.PI_MEMORY_AGENT_DIR;
+	process.env.PI_MEMORY_AGENT_DIR = agent;
+	try {
+		fs.mkdirSync(path.join(root, ".pi"));
+		fs.writeFileSync(path.join(root, ".pi", "settings.json"), "{}");
+		fs.writeFileSync(path.join(root, "MEMORY.md"), "root memory");
+		fs.writeFileSync(path.join(agent, "MEMORY.md"), "global memory");
+
+		const harness = createHarness([]);
+		const ctx = {
+			cwd: root,
+			sessionManager: {
+				buildContextEntries: () => [],
+				getBranch: () => [],
+			},
+			ui: { notify() {} },
+		} as unknown as ExtensionContext;
+		await fire(harness.handlers, "session_start", { reason: "startup" }, ctx);
+		await fire(
+			harness.handlers,
+			"before_agent_start",
+			{ systemPrompt: "SYSTEM" },
+			ctx,
+		);
+		await fire(
+			harness.handlers,
+			"before_agent_start",
+			{ systemPrompt: "SYSTEM" },
+			ctx,
+		);
+
+		assert.equal(harness.entries.length, 1);
+		assert.equal(harness.entries[0]?.customType, "memory-read-event");
+		const entryRenderer = harness.entryRenderers.get("memory-read-event");
+		assert.ok(entryRenderer);
+		const theme = {
+			fg: (_color: string, text: string) => text,
+			bold: (text: string) => text,
+		};
+		const baseComponent = entryRenderer(
+			{ data: harness.entries[0]?.data },
+			{ expanded: false },
+			theme,
+		) as { render(width: number): string[] };
+		assert.deepEqual(baseComponent.render(80), ["✦ 读取了 2 份记忆"]);
+
+		const resumedHarness = createHarness([]);
+		const resumedCtx = {
+			...ctx,
+			sessionManager: {
+				buildContextEntries: () => [],
+				getBranch: () => [
+					{
+						type: "custom",
+						customType: "memory-read-event",
+						data: harness.entries[0]?.data,
+					},
+				],
+			},
+		} as unknown as ExtensionContext;
+		await fire(
+			resumedHarness.handlers,
+			"session_start",
+			{ reason: "resume" },
+			resumedCtx,
+		);
+		await fire(
+			resumedHarness.handlers,
+			"before_agent_start",
+			{ systemPrompt: "SYSTEM" },
+			resumedCtx,
+		);
+		assert.equal(resumedHarness.entries.length, 0);
+
+		const scopeRenderer = harness.messageRenderers.get("cyon-scope-memory");
+		assert.ok(scopeRenderer);
+		const scopeComponent = scopeRenderer(
+			{
+				content: "scope memory",
+				details: { scopeDir: path.join(root, "Projects", "pi") },
+			},
+			{ expanded: false },
+			theme,
+		) as { render(width: number): string[] };
+		assert.deepEqual(
+			scopeComponent.render(80).map((line) => line.trimEnd()),
+			["✦ 读取了 pi 记忆"],
+		);
 	} finally {
 		if (oldAgentDir === undefined) delete process.env.PI_MEMORY_AGENT_DIR;
 		else process.env.PI_MEMORY_AGENT_DIR = oldAgentDir;

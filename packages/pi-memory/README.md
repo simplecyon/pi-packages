@@ -19,6 +19,10 @@ At the start of an agent turn, the cache-stable base snapshot may contain:
 
 Each file appears once in the active context epoch.
 
+When the base snapshot is first injected, the TUI shows a durable,
+context-free event such as `✦ 读取了 2 份记忆`. Repeated agent turns with the
+same snapshot do not add duplicate events.
+
 ### Progressive disclosure
 
 - Read-only tools (`read`, `grep`, `find`, `ls`, and recognized non-mutating
@@ -30,6 +34,8 @@ Each file appears once in the active context epoch.
 - Returning to a previously injected scope does not trigger another block.
 - Moving between several directories therefore does not repeatedly interrupt
   the agent.
+- A newly disclosed scope renders as `✦ 读取了 <scope> 记忆`; `Ctrl+O` reveals
+  the injected memory content.
 
 ### Refresh and compaction
 

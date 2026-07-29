@@ -30,6 +30,7 @@ import {
 const DISABLE_ENV = "PI_NO_MEMORY_INJECTION";
 const AGENT_DIR_ENV = "PI_MEMORY_AGENT_DIR";
 const CUSTOM_TYPE = "cyon-scope-memory";
+const MEMORY_READ_ENTRY = "memory-read-event";
 const BASE_EVENT = "memory-injection:base-loaded";
 const CAPABILITY_AVAILABLE = "cyon:memory:available";
 const CAPABILITY_DISCOVER = "cyon:memory:discover";
@@ -44,6 +45,12 @@ interface ScopeMessageDetails {
 interface ScopeState extends ScopeMessageDetails {
 	status: "pending" | "resident";
 	readyAtTurn: number;
+}
+
+interface MemoryReadEntry {
+	signature: string;
+	labels: string[];
+	recordedAt: string;
 }
 
 function formatScopeMessage(memory: MemoryFile, cwd: string): string {
@@ -139,8 +146,49 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 	let epoch = 0;
 	let enabled = process.env[DISABLE_ENV] !== "1";
 	const scopes = new Map<string, ScopeState>();
+	const announcedBaseSignatures = new Set<string>();
 
 	const getConfiguredAgentDir = () => process.env[AGENT_DIR_ENV] || getAgentDir();
+
+	function baseMemoryLabels(): string[] {
+		const agentDir = getConfiguredAgentDir();
+		return snapshot.files.map((file) => {
+			if (isSamePath(file.scopeDir, agentDir)) return "全局";
+			const relative = path.relative(snapshot.projectRoot, file.scopeDir);
+			return relative || path.basename(snapshot.projectRoot);
+		});
+	}
+
+	function rebuildReadAnnouncements(ctx: ExtensionContext): void {
+		announcedBaseSignatures.clear();
+		const manager = ctx.sessionManager as unknown as {
+			getBranch?: () => unknown[];
+		};
+		for (const candidate of manager.getBranch?.() ?? []) {
+			const entry = candidate as {
+				type?: string;
+				customType?: string;
+				data?: Partial<MemoryReadEntry>;
+			};
+			if (
+				entry.type === "custom" &&
+				entry.customType === MEMORY_READ_ENTRY &&
+				typeof entry.data?.signature === "string"
+			) {
+				announcedBaseSignatures.add(entry.data.signature);
+			}
+		}
+	}
+
+	function announceBaseRead(): void {
+		if (announcedBaseSignatures.has(snapshot.signature)) return;
+		pi.appendEntry<MemoryReadEntry>(MEMORY_READ_ENTRY, {
+			signature: snapshot.signature,
+			labels: baseMemoryLabels(),
+			recordedAt: new Date().toISOString(),
+		});
+		announcedBaseSignatures.add(snapshot.signature);
+	}
 
 	function emitBase(): void {
 		const payload = {
@@ -245,13 +293,46 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 
 	pi.events.on(CAPABILITY_DISCOVER, emitBase);
 
+	pi.registerEntryRenderer<MemoryReadEntry>(
+		MEMORY_READ_ENTRY,
+		(entry, { expanded }, theme) => {
+			const data = entry.data;
+			const labels = data?.labels ?? [];
+			const subject =
+				labels.length === 1 ? labels[0] : `${labels.length} 份`;
+			const object =
+				labels.length === 1
+					? `${theme.fg("accent", theme.bold(subject ?? "记忆"))} ${theme.fg("muted", "记忆")}`
+					: `${theme.fg("accent", theme.bold(subject))}${theme.fg("muted", "记忆")}`;
+			const line = [
+				theme.fg("accent", "✦"),
+				theme.fg("muted", "读取了"),
+				object,
+			].join(" ");
+			const details =
+				expanded && data
+					? `\n${theme.fg("dim", `${labels.join(" · ")} · ${data.recordedAt}`)}`
+					: "";
+			const text = line + details;
+			return {
+				render: () => text.split("\n"),
+				invalidate: () => {},
+			};
+		},
+	);
+
 	pi.registerMessageRenderer<ScopeMessageDetails>(
 		CUSTOM_TYPE,
 		(message, { expanded }, theme) => {
 			const scope = message.details?.scopeDir
 				? path.basename(message.details.scopeDir)
 				: "scope";
-			const header = `·recall memory ${theme.fg("dim", scope)}`;
+			const header = [
+				theme.fg("accent", "✦"),
+				theme.fg("muted", "读取了"),
+				theme.fg("accent", theme.bold(scope)),
+				theme.fg("muted", "记忆"),
+			].join(" ");
 			if (!expanded) return new Text(header, 0, 0);
 			const content =
 				typeof message.content === "string"
@@ -300,6 +381,7 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 		currentTurn = 0;
 		epoch = 0;
 		scopes.clear();
+		rebuildReadAnnouncements(ctx);
 		if (!enabled) return;
 		refreshBase(ctx.cwd);
 		rebuildResidency(ctx);
@@ -308,6 +390,7 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 	pi.on("session_tree", (_event, ctx) => {
 		if (!enabled) return;
 		epoch += 1;
+		rebuildReadAnnouncements(ctx);
 		refreshBase(ctx.cwd);
 		rebuildResidency(ctx);
 	});
@@ -335,6 +418,7 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 		if (!enabled) return;
 		refreshBase(ctx.cwd);
 		if (snapshot.files.length === 0) return;
+		announceBaseRead();
 		return {
 			systemPrompt: `${event.systemPrompt}\n\n<project_memory>\n${formatBase(snapshot)}\n</project_memory>\n`,
 		};
