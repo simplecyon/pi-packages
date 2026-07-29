@@ -13,8 +13,8 @@ Compact, low-noise rendering for Pi's built-in tool events, plus the
 - Bash failures stay compact while retaining outcomes such as timeout or exit
   status.
 - Collapsed edits show a high-contrast compact diff with one context line, a
-  single omission marker between distant change groups, and a subtle
-  theme-adaptive background on added and removed rows.
+  single omission marker between distant change groups, and subtle
+  theme-adaptive green/red backgrounds on added and removed rows.
 - `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls` use
   background-free self-rendered shells.
 - `Ctrl+O` continues to use Pi's native expanded state and restores full native

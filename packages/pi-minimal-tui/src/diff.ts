@@ -8,6 +8,103 @@ export interface CompactDiffLine {
 	text: string;
 }
 
+interface Rgb {
+	r: number;
+	g: number;
+	b: number;
+}
+
+const ANSI_16_COLORS: readonly Rgb[] = [
+	{ r: 0, g: 0, b: 0 },
+	{ r: 128, g: 0, b: 0 },
+	{ r: 0, g: 128, b: 0 },
+	{ r: 128, g: 128, b: 0 },
+	{ r: 0, g: 0, b: 128 },
+	{ r: 128, g: 0, b: 128 },
+	{ r: 0, g: 128, b: 128 },
+	{ r: 192, g: 192, b: 192 },
+	{ r: 128, g: 128, b: 128 },
+	{ r: 255, g: 0, b: 0 },
+	{ r: 0, g: 255, b: 0 },
+	{ r: 255, g: 255, b: 0 },
+	{ r: 0, g: 0, b: 255 },
+	{ r: 255, g: 0, b: 255 },
+	{ r: 0, g: 255, b: 255 },
+	{ r: 255, g: 255, b: 255 },
+];
+
+function ansi256ToRgb(index: number): Rgb {
+	if (index < 16) return ANSI_16_COLORS[index] ?? { r: 0, g: 0, b: 0 };
+	if (index >= 232) {
+		const value = 8 + (index - 232) * 10;
+		return { r: value, g: value, b: value };
+	}
+	const cube = index - 16;
+	const levels = [0, 95, 135, 175, 215, 255];
+	return {
+		r: levels[Math.floor(cube / 36)] ?? 0,
+		g: levels[Math.floor((cube % 36) / 6)] ?? 0,
+		b: levels[cube % 6] ?? 0,
+	};
+}
+
+function rgbToAnsi256({ r, g, b }: Rgb): number {
+	if (r === g && g === b) {
+		if (r < 8) return 16;
+		if (r > 248) return 231;
+		return Math.round((r - 8) / 10) + 232;
+	}
+	const toCube = (value: number) => Math.round((value / 255) * 5);
+	return 16 + 36 * toCube(r) + 6 * toCube(g) + toCube(b);
+}
+
+function rgbFromAnsi(ansi: string): Rgb | undefined {
+	const truecolor = ansi.match(/\[(?:38|48);2;(\d+);(\d+);(\d+)m/);
+	if (truecolor) {
+		return {
+			r: Number(truecolor[1]),
+			g: Number(truecolor[2]),
+			b: Number(truecolor[3]),
+		};
+	}
+	const indexed = ansi.match(/\[(?:38|48);5;(\d+)m/);
+	return indexed ? ansi256ToRgb(Number(indexed[1])) : undefined;
+}
+
+function mix(base: Rgb, tint: Rgb, tintRatio = 0.28): Rgb {
+	const channel = (baseValue: number, tintValue: number) =>
+		Math.round(baseValue * (1 - tintRatio) + tintValue * tintRatio);
+	return {
+		r: channel(base.r, tint.r),
+		g: channel(base.g, tint.g),
+		b: channel(base.b, tint.b),
+	};
+}
+
+function semanticBackground(
+	theme: Theme,
+	color: "toolDiffAdded" | "toolDiffRemoved",
+	text: string,
+): string {
+	if (
+		typeof theme.getBgAnsi !== "function" ||
+		typeof theme.getFgAnsi !== "function" ||
+		typeof theme.getColorMode !== "function"
+	) {
+		return theme.bg("selectedBg", text);
+	}
+	const base = rgbFromAnsi(theme.getBgAnsi("selectedBg"));
+	const tint = rgbFromAnsi(theme.getFgAnsi(color));
+	if (!base || !tint) return theme.bg("selectedBg", text);
+
+	const background = mix(base, tint);
+	const ansi =
+		theme.getColorMode() === "truecolor"
+			? `\x1b[48;2;${background.r};${background.g};${background.b}m`
+			: `\x1b[48;5;${rgbToAnsi256(background)}m`;
+	return `${ansi}${text}\x1b[49m`;
+}
+
 function parseDiffLine(line: string): CompactDiffLine {
 	const match = line.match(/^([+\-\s])(\s*\d*)\s(.*)$/);
 	if (!match) return { kind: "context", text: line };
@@ -63,9 +160,9 @@ export function compactDiffLines(diffText: string, contextLines = 1): CompactDif
 function colorLine(line: CompactDiffLine, theme: Theme): string {
 	switch (line.kind) {
 		case "added":
-			return theme.bg("selectedBg", theme.fg("toolDiffAdded", line.text));
+			return semanticBackground(theme, "toolDiffAdded", theme.fg("toolDiffAdded", line.text));
 		case "removed":
-			return theme.bg("selectedBg", theme.fg("toolDiffRemoved", line.text));
+			return semanticBackground(theme, "toolDiffRemoved", theme.fg("toolDiffRemoved", line.text));
 		case "omission":
 			return theme.fg("dim", line.text);
 		default:

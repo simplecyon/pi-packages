@@ -37,20 +37,30 @@ test("compact diff assigns distinct semantic colors", () => {
 		bg(color: string, text: string) {
 			return `<bg:${color}>${text}</bg:${color}>`;
 		},
-	} as Theme;
+		getFgAnsi(color: string) {
+			return color === "toolDiffAdded" ? "\x1b[38;2;126;231;135m" : "\x1b[38;2;255;123;114m";
+		},
+		getBgAnsi() {
+			return "\x1b[48;2;58;58;74m";
+		},
+		getColorMode() {
+			return "truecolor";
+		},
+	} as unknown as Theme;
 	const rendered = new CompactDiffComponent(distantChanges, theme).render();
 
 	assert.ok(
 		rendered.some(
 			(line) =>
 				line ===
-				"<bg:selectedBg><toolDiffRemoved>-2 const oldA = true;</toolDiffRemoved></bg:selectedBg>",
+				"\x1b[48;2;113;76;85m<toolDiffRemoved>-2 const oldA = true;</toolDiffRemoved>\x1b[49m",
 		),
 	);
 	assert.ok(
 		rendered.some(
 			(line) =>
-				line === "<bg:selectedBg><toolDiffAdded>+2 const newA = true;</toolDiffAdded></bg:selectedBg>",
+				line ===
+				"\x1b[48;2;77;106;91m<toolDiffAdded>+2 const newA = true;</toolDiffAdded>\x1b[49m",
 		),
 	);
 	assert.ok(rendered.includes("<dim>  …</dim>"));
