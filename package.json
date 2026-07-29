@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Cyon's package-only extensions and themes for Pi",
+  "packageManager": "pnpm@11.9.0",
   "keywords": [
     "pi-package",
     "pi-extension",
@@ -14,7 +15,7 @@
     "packages/*"
   ],
   "scripts": {
-    "check": "npm run check --workspaces --if-present && npm run test:integration",
+    "check": "pnpm -r --if-present run check && pnpm run test:integration",
     "test:integration": "node --test tests/*.test.mjs"
   },
   "pi": {
