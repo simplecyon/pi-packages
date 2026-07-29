@@ -428,6 +428,7 @@ function buildBarSegments(b: Breakdown, scale = 1): BarSegment[] {
 }
 
 const DETAIL_FRAME_ROWS = 6; // 上边框 + 标题 + 分隔线 + 分隔线 + footer + 下边框
+const DETAIL_MAX_ROWS = 25; // 二级窗口最多显示 25 行正文
 
 class ContextPanel {
 	focused = false;
@@ -488,7 +489,10 @@ class ContextPanel {
 	}
 
 	private detailPageSize(): number {
-		return Math.max(1, this.terminalRows() - DETAIL_FRAME_ROWS);
+		return Math.max(
+			1,
+			Math.min(DETAIL_MAX_ROWS, this.terminalRows() - DETAIL_FRAME_ROWS),
+		);
 	}
 
 	private detailLines(): string[] {
