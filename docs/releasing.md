@@ -1,13 +1,13 @@
 # Releasing packages
 
 Each workspace under `packages/` is published independently to the public npm
-registry under the `@cyon` scope. The repository root remains private and is
+registry under the `@simplecyon` scope. The repository root remains private and is
 not published.
 
 ## One-time npm setup
 
 The first release requires an npm account with permission to publish public
-packages under `@cyon`.
+packages under `@simplecyon`.
 
 1. Sign in locally with `npm login`.
 2. Confirm the account with `npm whoami`.
@@ -61,9 +61,9 @@ The workflow refuses to publish a version that is already present on npm.
 
 | Workspace | npm package |
 | --- | --- |
-| `pi-minimal-tui` | `@cyon/pi-minimal-tui` |
-| `pi-memory` | `@cyon/pi-memory` |
-| `pi-context-compact` | `@cyon/pi-context-compact` |
-| `pi-context-inspector` | `@cyon/pi-context-inspector` |
-| `pi-session-tasks` | `@cyon/pi-session-tasks` |
-| `pi-skill-telemetry` | `@cyon/pi-skill-telemetry` |
+| `pi-minimal-tui` | `@simplecyon/pi-minimal-tui` |
+| `pi-memory` | `@simplecyon/pi-memory` |
+| `pi-context-compact` | `@simplecyon/pi-context-compact` |
+| `pi-context-inspector` | `@simplecyon/pi-context-inspector` |
+| `pi-session-tasks` | `@simplecyon/pi-session-tasks` |
+| `pi-skill-telemetry` | `@simplecyon/pi-skill-telemetry` |

@@ -1,5 +1,5 @@
 {
-  "name": "@cyon/pi-skill-telemetry",
+  "name": "@simplecyon/pi-skill-telemetry",
   "version": "0.1.0",
   "type": "module",
   "description": "Privacy-preserving local skill telemetry for Pi with immutable segments for agent-sync",

@@ -9,12 +9,12 @@ const manifest = JSON.parse(
 	fs.readFileSync(path.join(root, "package.json"), "utf8"),
 );
 const expectedPackages = new Map([
-	["pi-context-compact", "@cyon/pi-context-compact"],
-	["pi-context-inspector", "@cyon/pi-context-inspector"],
-	["pi-memory", "@cyon/pi-memory"],
-	["pi-minimal-tui", "@cyon/pi-minimal-tui"],
-	["pi-session-tasks", "@cyon/pi-session-tasks"],
-	["pi-skill-telemetry", "@cyon/pi-skill-telemetry"],
+	["pi-context-compact", "@simplecyon/pi-context-compact"],
+	["pi-context-inspector", "@simplecyon/pi-context-inspector"],
+	["pi-memory", "@simplecyon/pi-memory"],
+	["pi-minimal-tui", "@simplecyon/pi-minimal-tui"],
+	["pi-session-tasks", "@simplecyon/pi-session-tasks"],
+	["pi-skill-telemetry", "@simplecyon/pi-skill-telemetry"],
 ]);
 
 test("aggregate manifest points to existing package resources", () => {
@@ -41,7 +41,7 @@ test("workspace package names are unique", () => {
 	assert.equal(new Set(names).size, names.length);
 });
 
-test("every workspace is independently publishable under @cyon", () => {
+test("every workspace is independently publishable under @simplecyon", () => {
 	for (const [directory, expectedName] of expectedPackages) {
 		const packageRoot = path.join(root, "packages", directory);
 		const packageManifest = JSON.parse(

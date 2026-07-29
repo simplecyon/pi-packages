@@ -1,4 +1,4 @@
-# @cyon/pi-context-inspector
+# @simplecyon/pi-context-inspector
 
 Context-usage diagnostics for Pi through the `/context` command.
 
@@ -26,13 +26,13 @@ components.
 Install only this package:
 
 ```bash
-pi install npm:@cyon/pi-context-inspector
+pi install npm:@simplecyon/pi-context-inspector
 ```
 
 For a trusted project-local installation:
 
 ```bash
-pi install npm:@cyon/pi-context-inspector -l --approve
+pi install npm:@simplecyon/pi-context-inspector -l --approve
 ```
 
 For local development:
@@ -60,7 +60,7 @@ Then run:
 - Character-based estimates can undercount Chinese text, so category
   proportions are directional rather than billing-grade measurements.
 - Base memory already present in the system prompt is not counted again when
-  `@cyon/pi-memory` records its session metadata.
+  `@simplecyon/pi-memory` records its session metadata.
 
 See [`RESEARCH.md`](RESEARCH.md) for source-level research and
 [`REQUIREMENTS.md`](REQUIREMENTS.md) for the product specification.
@@ -74,14 +74,14 @@ See [`RESEARCH.md`](RESEARCH.md) for source-level research and
 
 ## Compatibility
 
-Targets Pi 0.82.x and integrates with `@cyon/pi-memory`.
+Targets Pi 0.82.x and integrates with `@simplecyon/pi-memory`.
 
 ## Development
 
 From the monorepo root:
 
 ```bash
-pnpm --filter @cyon/pi-context-inspector check
+pnpm --filter @simplecyon/pi-context-inspector check
 ```
 
 See the [repository README](../../README.md) for suite installation and

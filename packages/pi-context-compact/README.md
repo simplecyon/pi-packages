@@ -1,4 +1,4 @@
-# @cyon/pi-context-compact
+# @simplecyon/pi-context-compact
 
 Package-only durable context compaction for Pi.
 
@@ -25,13 +25,13 @@ the `compact_search` tool instead of being replayed into every model request.
 Install only this package:
 
 ```bash
-pi install npm:@cyon/pi-context-compact
+pi install npm:@simplecyon/pi-context-compact
 ```
 
 For a trusted project-local installation:
 
 ```bash
-pi install npm:@cyon/pi-context-compact -l --approve
+pi install npm:@simplecyon/pi-context-compact -l --approve
 ```
 
 For local development:
@@ -73,7 +73,7 @@ Targets Pi 0.82.x.
 From the monorepo root:
 
 ```bash
-pnpm --filter @cyon/pi-context-compact check
+pnpm --filter @simplecyon/pi-context-compact check
 ```
 
 See the [repository README](../../README.md) for suite installation and

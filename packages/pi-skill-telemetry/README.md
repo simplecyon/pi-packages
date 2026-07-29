@@ -1,4 +1,4 @@
-# @cyon/pi-skill-telemetry
+# @simplecyon/pi-skill-telemetry
 
 Privacy-preserving local skill usage telemetry for Pi.
 
@@ -40,13 +40,13 @@ workflow. This package does not send telemetry over the network itself.
 Install only this package:
 
 ```bash
-pi install npm:@cyon/pi-skill-telemetry
+pi install npm:@simplecyon/pi-skill-telemetry
 ```
 
 For a trusted project-local installation:
 
 ```bash
-pi install npm:@cyon/pi-skill-telemetry -l --approve
+pi install npm:@simplecyon/pi-skill-telemetry -l --approve
 ```
 
 For local development:
@@ -82,7 +82,7 @@ or cross-device aggregation is intentionally outside this package.
 From the monorepo root:
 
 ```bash
-pnpm --filter @cyon/pi-skill-telemetry check
+pnpm --filter @simplecyon/pi-skill-telemetry check
 ```
 
 See the [repository README](../../README.md) for suite installation and

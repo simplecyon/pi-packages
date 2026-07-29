@@ -1,5 +1,5 @@
 {
-  "name": "@cyon/pi-session-tasks",
+  "name": "@simplecyon/pi-session-tasks",
   "version": "0.1.0",
   "type": "module",
   "description": "Session-scoped, branch-aware task tracking for Pi",

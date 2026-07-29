@@ -7,12 +7,12 @@ Cyon's package-only extensions and themes for
 
 | Workspace | Package | Purpose |
 | --- | --- | --- |
-| [`packages/pi-minimal-tui`](packages/pi-minimal-tui) | `@cyon/pi-minimal-tui` | Compact tool-event rendering and the `cyon-minimal-dark` theme |
-| [`packages/pi-memory`](packages/pi-memory) | `@cyon/pi-memory` | Cache-stable memory injection with scope-aware progressive disclosure |
-| [`packages/pi-context-compact`](packages/pi-context-compact) | `@cyon/pi-context-compact` | Durable compaction checkpoints and cold-history search |
-| [`packages/pi-context-inspector`](packages/pi-context-inspector) | `@cyon/pi-context-inspector` | `/context` diagnostics for prompt and conversation usage |
-| [`packages/pi-session-tasks`](packages/pi-session-tasks) | `@cyon/pi-session-tasks` | Session-local, branch-aware structured task tracking |
-| [`packages/pi-skill-telemetry`](packages/pi-skill-telemetry) | `@cyon/pi-skill-telemetry` | Privacy-preserving local skill usage telemetry |
+| [`packages/pi-minimal-tui`](packages/pi-minimal-tui) | `@simplecyon/pi-minimal-tui` | Compact tool-event rendering and the `cyon-minimal-dark` theme |
+| [`packages/pi-memory`](packages/pi-memory) | `@simplecyon/pi-memory` | Cache-stable memory injection with scope-aware progressive disclosure |
+| [`packages/pi-context-compact`](packages/pi-context-compact) | `@simplecyon/pi-context-compact` | Durable compaction checkpoints and cold-history search |
+| [`packages/pi-context-inspector`](packages/pi-context-inspector) | `@simplecyon/pi-context-inspector` | `/context` diagnostics for prompt and conversation usage |
+| [`packages/pi-session-tasks`](packages/pi-session-tasks) | `@simplecyon/pi-session-tasks` | Session-local, branch-aware structured task tracking |
+| [`packages/pi-skill-telemetry`](packages/pi-skill-telemetry) | `@simplecyon/pi-skill-telemetry` | Privacy-preserving local skill usage telemetry |
 
 `context-mode-cyon` remains outside this repository because it is an upstream
 fork with its own history, build system, and release cadence.
@@ -22,12 +22,12 @@ fork with its own history, build system, and release cadence.
 Every workspace is an independent public npm package:
 
 ```bash
-pi install npm:@cyon/pi-minimal-tui
-pi install npm:@cyon/pi-memory
-pi install npm:@cyon/pi-context-compact
-pi install npm:@cyon/pi-context-inspector
-pi install npm:@cyon/pi-session-tasks
-pi install npm:@cyon/pi-skill-telemetry
+pi install npm:@simplecyon/pi-minimal-tui
+pi install npm:@simplecyon/pi-memory
+pi install npm:@simplecyon/pi-context-compact
+pi install npm:@simplecyon/pi-context-inspector
+pi install npm:@simplecyon/pi-session-tasks
+pi install npm:@simplecyon/pi-skill-telemetry
 ```
 
 Add `-l --approve` to any command for a trusted project-local installation.
@@ -79,8 +79,8 @@ pnpm run release:dry-run
 Run one package only:
 
 ```bash
-pnpm --filter @cyon/pi-memory check
-pnpm --filter @cyon/pi-minimal-tui check
+pnpm --filter @simplecyon/pi-memory check
+pnpm --filter @simplecyon/pi-minimal-tui check
 ```
 
 `pnpm run check` runs every workspace's typecheck and tests, then verifies that

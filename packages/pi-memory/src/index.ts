@@ -149,7 +149,7 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 		};
 		pi.events.emit(BASE_EVENT, payload);
 		pi.events.emit(CAPABILITY_AVAILABLE, {
-			owner: "@cyon/pi-memory",
+			owner: "@simplecyon/pi-memory",
 			protocolVersion: 1,
 			baseEvent: BASE_EVENT,
 			scopeMessageType: CUSTOM_TYPE,

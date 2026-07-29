@@ -1,5 +1,5 @@
 {
-  "name": "@cyon/pi-packages",
+  "name": "@simplecyon/pi-packages",
   "version": "0.1.0",
   "private": true,
   "type": "module",

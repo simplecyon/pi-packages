@@ -1,4 +1,4 @@
-# @cyon/pi-memory
+# @simplecyon/pi-memory
 
 Package-only, scoped `MEMORY.md` injection for Pi.
 
@@ -45,13 +45,13 @@ Each file appears once in the active context epoch.
 Install only this package:
 
 ```bash
-pi install npm:@cyon/pi-memory
+pi install npm:@simplecyon/pi-memory
 ```
 
 For a trusted project-local installation:
 
 ```bash
-pi install npm:@cyon/pi-memory -l --approve
+pi install npm:@simplecyon/pi-memory -l --approve
 ```
 
 For local development:
@@ -87,7 +87,7 @@ PI_MEMORY_AGENT_DIR=/absolute/path pi
 ## Compatibility
 
 The package emits `memory-injection:base-loaded` for
-`@cyon/pi-context-inspector` and announces the
+`@simplecyon/pi-context-inspector` and announces the
 `cyon:memory:available` capability to compatible extensions.
 
 Targets Pi 0.82.x.
@@ -97,7 +97,7 @@ Targets Pi 0.82.x.
 From the monorepo root:
 
 ```bash
-pnpm --filter @cyon/pi-memory check
+pnpm --filter @simplecyon/pi-memory check
 ```
 
 See the [repository README](../../README.md) for suite installation and

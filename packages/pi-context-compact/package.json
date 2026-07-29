@@ -1,5 +1,5 @@
 {
-  "name": "@cyon/pi-context-compact",
+  "name": "@simplecyon/pi-context-compact",
   "version": "0.1.1",
   "type": "module",
   "description": "Standalone checkpoint and searchable cold-history compaction for Pi",

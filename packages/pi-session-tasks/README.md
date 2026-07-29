@@ -1,4 +1,4 @@
-# @cyon/pi-session-tasks
+# @simplecyon/pi-session-tasks
 
 Session-scoped, branch-aware structured task tracking for Pi.
 
@@ -29,13 +29,13 @@ for one-step edits.
 Install only this package:
 
 ```bash
-pi install npm:@cyon/pi-session-tasks
+pi install npm:@simplecyon/pi-session-tasks
 ```
 
 For a trusted project-local installation:
 
 ```bash
-pi install npm:@cyon/pi-session-tasks -l --approve
+pi install npm:@simplecyon/pi-session-tasks -l --approve
 ```
 
 For local development:
@@ -66,7 +66,7 @@ session lifecycle; it is not synchronized across independent sessions.
 From the monorepo root:
 
 ```bash
-pnpm --filter @cyon/pi-session-tasks check
+pnpm --filter @simplecyon/pi-session-tasks check
 ```
 
 See the [repository README](../../README.md) for suite installation and

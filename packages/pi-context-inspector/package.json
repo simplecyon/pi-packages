@@ -1,5 +1,5 @@
 {
-  "name": "@cyon/pi-context-inspector",
+  "name": "@simplecyon/pi-context-inspector",
   "version": "0.1.0",
   "type": "module",
   "description": "Categorized /context diagnostics for Pi sessions",
