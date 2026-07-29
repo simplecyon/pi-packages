@@ -14,6 +14,7 @@ const expectedPackages = new Map([
 	["pi-context-inspector", "@simplecyon/pi-context-inspector"],
 	["pi-memory", "@simplecyon/pi-memory"],
 	["pi-minimal-tui", "@simplecyon/pi-minimal-tui"],
+	["pi-safe-operation", "@simplecyon/pi-safe-operation"],
 	["pi-session-tasks", "@simplecyon/pi-session-tasks"],
 	["pi-skill-telemetry", "@simplecyon/pi-skill-telemetry"],
 ]);
@@ -23,7 +24,7 @@ test("aggregate manifest points to existing package resources", () => {
 		...(manifest.pi?.extensions ?? []),
 		...(manifest.pi?.themes ?? []),
 	];
-	assert.equal(resources.length, 8);
+	assert.equal(resources.length, 9);
 	for (const resource of resources) {
 		assert.equal(
 			fs.existsSync(path.resolve(root, resource)),

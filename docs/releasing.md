@@ -25,7 +25,7 @@ cd packages/pi-memory
 npm publish --access public
 ```
 
-Repeat the final command for the other five workspaces.
+Repeat the final command for the other seven workspaces.
 
 ## Trusted Publishing
 
@@ -37,7 +37,7 @@ After a package exists on npm, configure its npm Trusted Publisher:
 - Workflow: `publish-package.yml`
 - Environment: `npm`
 
-Configure all six packages. The workflow uses GitHub OIDC and does not require a
+Configure all eight packages. The workflow uses GitHub OIDC and does not require a
 long-lived `NPM_TOKEN`.
 
 ## Publishing a new version
@@ -61,8 +61,10 @@ The workflow refuses to publish a version that is already present on npm.
 
 | Workspace | npm package |
 | --- | --- |
+| `pi-ask-user-question` | `@simplecyon/pi-ask-user-question` |
 | `pi-minimal-tui` | `@simplecyon/pi-minimal-tui` |
 | `pi-memory` | `@simplecyon/pi-memory` |
+| `pi-safe-operation` | `@simplecyon/pi-safe-operation` |
 | `pi-context-compact` | `@simplecyon/pi-context-compact` |
 | `pi-context-inspector` | `@simplecyon/pi-context-inspector` |
 | `pi-session-tasks` | `@simplecyon/pi-session-tasks` |
