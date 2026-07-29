@@ -25,6 +25,10 @@ Compact, low-noise rendering for Pi's built-in tool events, plus the
   highlighter selected from the edited file extension.
 - `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls` use
   background-free self-rendered shells.
+- When `@simplecyon/pi-safe-operation` is loaded in the same Pi runtime, the
+  Bash renderer forwards partial and final output through its synchronous
+  local redaction capability before rendering. Without that package, output
+  behavior is unchanged.
 - `Ctrl+O` continues to use Pi's native expanded state and restores full native
   output, including syntax highlighting, images, errors, timing, and complete
   diffs.

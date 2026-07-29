@@ -17,6 +17,12 @@ test("registers all built-in tools with self-rendered shells", () => {
 	const tools: Array<{ name: string; renderShell?: string }> = [];
 	const pi = {
 		on() {},
+		events: {
+			on() {
+				return () => {};
+			},
+			emit() {},
+		},
 		registerTool(tool: { name: string; renderShell?: string }) {
 			tools.push(tool);
 		},
@@ -29,6 +35,51 @@ test("registers all built-in tools with self-rendered shells", () => {
 		["read", "bash", "edit", "write", "grep", "find", "ls"],
 	);
 	assert.ok(tools.every((tool) => tool.renderShell === "self"));
+});
+
+test("forwards Bash partial and final output through the safety redaction bridge", async () => {
+	const tools = new Map<string, ToolDefinition>();
+	const secret = ["xoxb", "1234567890", "minimalbridge"].join("-");
+	const pi = {
+		on() {},
+		events: {
+			on() {
+				return () => {};
+			},
+			emit(channel: string, request: { value?: unknown }) {
+				if (channel !== "simplecyon:safe-operation:redact") return;
+				request.value = JSON.parse(
+					JSON.stringify(request.value).split(secret).join("<redacted:bridge>"),
+				);
+			},
+		},
+		registerTool(tool: ToolDefinition) {
+			tools.set(tool.name, tool);
+		},
+	} as unknown as ExtensionAPI;
+	minimalTuiExtension(pi);
+	const bash = tools.get("bash");
+	assert.ok(bash);
+
+	const updates: unknown[] = [];
+	const result = await bash.execute(
+		"bash-redaction-bridge",
+		{ command: `printf 'TOKEN=${secret}'` },
+		undefined,
+		(partial: unknown) => updates.push(partial as any),
+		{
+			cwd: process.cwd(),
+			sessionManager: {
+				getSessionId: () => "minimal-tui-test-session",
+				getSessionFile: () => undefined,
+			},
+			model: undefined,
+			thinkingLevel: undefined,
+		} as any,
+	);
+	const serialized = JSON.stringify({ updates, result });
+	assert.doesNotMatch(serialized, new RegExp(secret));
+	assert.match(serialized, /<redacted:bridge>/);
 });
 
 test("decorated read definition renders a real compact call and honors expanded output", () => {

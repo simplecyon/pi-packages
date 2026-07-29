@@ -24,6 +24,10 @@ interface MinimalRendererState {
 	outcome?: string;
 }
 
+const SAFE_REDACT_REQUEST = "simplecyon:safe-operation:redact";
+const BASH_REDACTION_OWNER_DISCOVER = "simplecyon:bash-redaction-owner:discover";
+const BASH_REDACTION_OWNER_AVAILABLE = "simplecyon:bash-redaction-owner:available";
+
 function textResult(result: { content: Array<{ type: string; text?: string }> }): Text | undefined {
 	const output = result.content
 		.filter((block) => block.type === "text")
@@ -108,6 +112,26 @@ function decorateTool(base: ToolDefinition, grouping: ActionGroupCoordinator): T
 	};
 }
 
+function addBashRedactionBridge(definition: ToolDefinition, pi: ExtensionAPI): ToolDefinition {
+	if (definition.name !== "bash") return definition;
+	const originalExecute = definition.execute;
+	const sanitize = (value: unknown, phase: "stream" | "final"): unknown => {
+		const request = { value, phase };
+		pi.events.emit(SAFE_REDACT_REQUEST, request);
+		return request.value;
+	};
+	return {
+		...definition,
+		async execute(toolCallId, params, signal, onUpdate, context) {
+			const safeUpdate = onUpdate
+				? (partial: unknown) => onUpdate(sanitize(partial, "stream") as any)
+				: undefined;
+			const result = await originalExecute(toolCallId, params, signal, safeUpdate, context);
+			return sanitize(result, "final") as any;
+		},
+	};
+}
+
 export function createMinimalToolDefinitions(
 	cwd: string,
 	grouping = new ActionGroupCoordinator(),
@@ -127,6 +151,14 @@ export default function minimalTuiExtension(pi: ExtensionAPI): void {
 	installCompactUserMessageRendering();
 	const cwd = process.cwd();
 	const grouping = new ActionGroupCoordinator();
+	const announceBashRedactionOwner = () => {
+		pi.events.emit(BASH_REDACTION_OWNER_AVAILABLE, {
+			owner: "@simplecyon/pi-minimal-tui",
+			protocolVersion: 1,
+		});
+	};
+	pi.events.on(BASH_REDACTION_OWNER_DISCOVER, announceBashRedactionOwner);
+	announceBashRedactionOwner();
 
 	pi.on("session_start", (_event, context) => {
 		grouping.rebuild(context.sessionManager.getBranch());
@@ -148,6 +180,6 @@ export default function minimalTuiExtension(pi: ExtensionAPI): void {
 	});
 
 	for (const definition of createMinimalToolDefinitions(cwd, grouping)) {
-		pi.registerTool(definition);
+		pi.registerTool(addBashRedactionBridge(definition, pi));
 	}
 }

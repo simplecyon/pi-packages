@@ -14,6 +14,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   CONFIG_DIR_NAME,
+  createBashToolDefinition,
   isToolCallEventType,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -21,6 +22,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 type FileKind = "file" | "directory" | "symlink" | "other" | "missing";
 type GitClass = "tracked" | "ignored" | "untracked" | "outside";
@@ -69,6 +71,23 @@ interface RedactionResult {
   kinds: Set<string>;
 }
 
+interface TrashManifestTarget {
+  original: string;
+  trashed: string;
+}
+
+interface TrashManifest {
+  version: number;
+  timestamp: string;
+  reason: string;
+  targets: TrashManifestTarget[];
+  restorations?: Array<{
+    timestamp: string;
+    reason: string;
+    targets: TrashManifestTarget[];
+  }>;
+}
+
 const DEFAULT_CONFIG: SafeOperationConfig = {
   version: 1,
   mode: "balanced",
@@ -115,6 +134,11 @@ const PRIVATE_KEY_PATHS = [
 
 const SECRET_ENV_NAME = /(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|ACCESS_KEY|AUTH)/i;
 const REDACTED_MARKER = /^<redacted:[^>]+>$/;
+const SAFE_CAPABILITY_DISCOVER = "simplecyon:safe-operation:discover";
+const SAFE_CAPABILITY_AVAILABLE = "simplecyon:safe-operation:available";
+const SAFE_REDACT_REQUEST = "simplecyon:safe-operation:redact";
+const BASH_REDACTION_OWNER_DISCOVER = "simplecyon:bash-redaction-owner:discover";
+const BASH_REDACTION_OWNER_AVAILABLE = "simplecyon:bash-redaction-owner:available";
 
 function unique(values: string[]): string[] {
   return [...new Set(values)];
@@ -523,11 +547,28 @@ function safeStringify(value: unknown): string {
 
 export default function (pi: ExtensionAPI) {
   let root = process.cwd();
+  const packageRepositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
   let config = { ...DEFAULT_CONFIG, redaction: { ...DEFAULT_CONFIG.redaction } };
   let sessionKey = crypto.randomBytes(32);
   let redactedTotal = 0;
   let blockedTotal = 0;
   let approvedTotal = 0;
+  let externalBashRedactionOwner = false;
+  let standaloneBashRegistered = false;
+
+  const announceCapability = () => {
+    pi.events.emit(SAFE_CAPABILITY_AVAILABLE, {
+      owner: "@simplecyon/pi-safe-operation",
+      protocolVersion: 1,
+      redactsToolResults: true,
+    });
+  };
+  pi.events.on(SAFE_CAPABILITY_DISCOVER, announceCapability);
+  announceCapability();
+  pi.events.on(BASH_REDACTION_OWNER_AVAILABLE, () => {
+    externalBashRedactionOwner = true;
+  });
+  pi.events.emit(BASH_REDACTION_OWNER_DISCOVER, {});
 
   function audit(action: string, data: Record<string, unknown>): void {
     try {
@@ -666,6 +707,52 @@ export default function (pi: ExtensionAPI) {
     return { value: next, count, kinds };
   }
 
+  function sanitizeBashPayload(payload: unknown, phase: "stream" | "final"): unknown {
+    try {
+      const sanitized = sanitizeUnknown(payload);
+      if (sanitized.count > 0) {
+        redactedTotal += sanitized.count;
+        audit(`redacted-bash-${phase}`, {
+          count: sanitized.count,
+          kinds: [...sanitized.kinds].sort(),
+        });
+      }
+      return sanitized.value;
+    } catch {
+      blockedTotal += 1;
+      return {
+        content: [{
+          type: "text" as const,
+          text: "[pi-safe-operation blocked Bash output because redaction failed]",
+        }],
+        details: { redacted: true, reason: "redaction-failed" },
+      };
+    }
+  }
+
+  pi.events.on(SAFE_REDACT_REQUEST, (request: unknown) => {
+    if (!request || typeof request !== "object") return;
+    const payload = request as { value?: unknown; phase?: unknown };
+    const phase = payload.phase === "stream" ? "stream" : "final";
+    payload.value = sanitizeBashPayload(payload.value, phase);
+  });
+
+  function registerStandaloneBash(): void {
+    if (externalBashRedactionOwner || standaloneBashRegistered) return;
+    const builtinBash = createBashToolDefinition(process.cwd());
+    pi.registerTool({
+      ...builtinBash,
+      async execute(toolCallId, params, signal, onUpdate, ctx) {
+        const safeUpdate = onUpdate
+          ? (partial: unknown) => onUpdate(sanitizeBashPayload(partial, "stream") as any)
+          : undefined;
+        const result = await builtinBash.execute(toolCallId, params, signal, safeUpdate, ctx);
+        return sanitizeBashPayload(result, "final") as any;
+      },
+    });
+    standaloneBashRegistered = true;
+  }
+
   async function confirmOperation(
     ctx: any,
     title: string,
@@ -695,6 +782,7 @@ export default function (pi: ExtensionAPI) {
     blockedTotal = 0;
     approvedTotal = 0;
     config = loadConfig(root, ctx.isProjectTrusted());
+    registerStandaloneBash();
   });
 
   pi.on("tool_call", async (event, ctx) => {
@@ -729,6 +817,7 @@ export default function (pi: ExtensionAPI) {
           matchesPathPattern(realRelative, config.protectedPaths);
         const knowledgeDir = underNamedDir(relative, config.knowledgeDirs);
         const reasons: string[] = [];
+        if (config.mode === "strict") reasons.push("strict mode requires approval for write/edit");
         if (protectedPattern) reasons.push(`protected path: ${protectedPattern}`);
         if (knowledgeDir && isCodeFile(absolute)) reasons.push(`code output inside vault knowledge directory: ${knowledgeDir}/`);
 
@@ -821,6 +910,17 @@ export default function (pi: ExtensionAPI) {
             reason: `${mixed}\n\nTargets:\n${targetLines(targets)}\n\n${commandSummary(command)}`,
           };
         }
+        if (config.mode === "strict") {
+          blockedTotal += 1;
+          audit("blocked-strict-raw-delete", {
+            targets: targets.map((target) => target.relative),
+          });
+          return {
+            block: true,
+            reason:
+              `Strict mode requires safe_delete for project deletion.\n\nTargets:\n${targetLines(targets)}`,
+          };
+        }
         const ok = await confirmOperation(
           ctx,
           "⚠️ Permanent deletion",
@@ -833,6 +933,7 @@ export default function (pi: ExtensionAPI) {
 
       const reasons = dangerousCommandReasons(command);
       if (looksLikeMutatingBash(command)) {
+        if (config.mode === "strict") reasons.push("strict mode requires approval for mutating Bash");
         const protectedPattern = mentionedProtectedPath(command, config);
         const knowledgeDir = mentionedCodeInKnowledgeDir(command, config);
         if (protectedPattern) reasons.push(`mutation references protected path: ${protectedPattern}`);
@@ -948,6 +1049,16 @@ export default function (pi: ExtensionAPI) {
     ],
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const cwd = fs.existsSync(ctx.cwd) ? fs.realpathSync.native(ctx.cwd) : path.resolve(ctx.cwd);
+      if (!config.recoverableDelete) {
+        blockedTotal += 1;
+        return {
+          content: [{
+            type: "text" as const,
+            text: "safe_delete is disabled by the active user policy.",
+          }],
+          details: { moved: [] },
+        };
+      }
       const paths = unique(params.paths.map((value) => value.trim()).filter(Boolean));
       if (paths.length === 0) {
         return {
@@ -1083,6 +1194,307 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerTool({
+    name: "safe_trash_list",
+    label: "Safe Trash List",
+    description:
+      "List recoverable pi-safe-operation trash manifests and their remaining restorable targets. This tool is read-only.",
+    parameters: Type.Object({
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+    }, { additionalProperties: false }),
+    promptSnippet: "safe_trash_list(limit?: number) → list recoverable deletion manifests",
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cwd = fs.existsSync(ctx.cwd) ? fs.realpathSync.native(ctx.cwd) : path.resolve(ctx.cwd);
+      const trashBase = path.join(cwd, ".trash", "pi-safe-operation");
+      const limit = params.limit ?? 20;
+      if (!fs.existsSync(trashBase)) {
+        return {
+          content: [{ type: "text" as const, text: "No pi-safe-operation trash manifests found." }],
+          details: { manifests: [] },
+        };
+      }
+
+      const manifests: Array<{
+        manifest: string;
+        timestamp: string;
+        reason: string;
+        total: number;
+        remaining: number;
+      }> = [];
+      for (const entry of fs.readdirSync(trashBase, { withFileTypes: true })
+        .filter((candidate) => candidate.isDirectory())
+        .sort((left, right) => right.name.localeCompare(left.name))) {
+        const manifestPath = path.join(trashBase, entry.name, "manifest.json");
+        try {
+          if (fs.lstatSync(manifestPath).isSymbolicLink()) continue;
+          if (!isInside(fs.realpathSync.native(trashBase), fs.realpathSync.native(manifestPath))) continue;
+          const parsed = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as TrashManifest;
+          if (!Array.isArray(parsed.targets)) continue;
+          const remaining = parsed.targets.filter((target) => {
+            if (typeof target?.trashed !== "string") return false;
+            const candidate = path.resolve(cwd, target.trashed);
+            return isInside(trashBase, candidate) && fs.existsSync(candidate);
+          }).length;
+          manifests.push({
+            manifest: normalizeRelative(path.relative(cwd, manifestPath)),
+            timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : entry.name,
+            reason: redactText(typeof parsed.reason === "string" ? parsed.reason : "").text,
+            total: parsed.targets.length,
+            remaining,
+          });
+          if (manifests.length >= limit) break;
+        } catch {
+          // Ignore malformed entries here; safe_restore validates a selected
+          // manifest strictly and fails closed.
+        }
+      }
+      if (manifests.length === 0) {
+        return {
+          content: [{ type: "text" as const, text: "No valid pi-safe-operation trash manifests found." }],
+          details: { manifests: [] },
+        };
+      }
+      const text = manifests.map((item) =>
+        [
+          item.manifest,
+          `  timestamp: ${item.timestamp}`,
+          `  remaining: ${item.remaining}/${item.total}`,
+          `  reason: ${item.reason || "(not recorded)"}`,
+        ].join("\n")
+      ).join("\n\n");
+      return {
+        content: [{ type: "text" as const, text }],
+        details: { manifests },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "safe_restore",
+    label: "Safe Restore",
+    description:
+      "Restore all or selected targets from a pi-safe-operation manifest. Existing destinations, protected paths, malformed manifests, and non-interactive execution are blocked.",
+    parameters: Type.Object({
+      manifest: Type.String({
+        minLength: 1,
+        description: "Project-relative manifest path returned by safe_trash_list or safe_delete.",
+      }),
+      paths: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
+        minItems: 1,
+        maxItems: 50,
+        description: "Optional original project-relative paths to restore. Omit to restore every remaining target.",
+      })),
+      reason: Type.String({
+        minLength: 1,
+        maxLength: 240,
+        description: "Why these exact targets should be restored.",
+      }),
+    }, { additionalProperties: false }),
+    promptSnippet:
+      "safe_restore(manifest: string, paths?: string[], reason: string) → restore recoverable targets after approval",
+    promptGuidelines: [
+      "Call safe_trash_list first when the manifest is not already known.",
+      "Never overwrite an existing destination during restore.",
+      "Restore only paths explicitly requested by the user; omit paths only when the user asked to restore the whole deletion transaction.",
+    ],
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cwd = fs.existsSync(ctx.cwd) ? fs.realpathSync.native(ctx.cwd) : path.resolve(ctx.cwd);
+      const trashBase = path.join(cwd, ".trash", "pi-safe-operation");
+      const manifestPath = path.resolve(cwd, params.manifest);
+      const fail = (message: string) => {
+        blockedTotal += 1;
+        audit("safe-restore-blocked", { manifest: params.manifest, reason: message });
+        return {
+          content: [{ type: "text" as const, text: `safe_restore blocked: ${message}` }],
+          details: { restored: [] },
+        };
+      };
+
+      if (
+        path.basename(manifestPath) !== "manifest.json" ||
+        !isInside(trashBase, manifestPath) ||
+        !fs.existsSync(manifestPath)
+      ) {
+        return fail("manifest must be an existing manifest.json inside .trash/pi-safe-operation/");
+      }
+      const realTrashBase = fs.realpathSync.native(trashBase);
+      if (
+        fs.lstatSync(manifestPath).isSymbolicLink() ||
+        !isInside(realTrashBase, fs.realpathSync.native(manifestPath))
+      ) {
+        return fail("manifest symlinks and paths escaping the managed trash are not allowed");
+      }
+
+      let manifest: TrashManifest;
+      try {
+        manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as TrashManifest;
+      } catch {
+        return fail("manifest is not valid JSON");
+      }
+      if (
+        manifest.version !== 1 ||
+        !Array.isArray(manifest.targets) ||
+        manifest.targets.some((target) =>
+          !target ||
+          typeof target.original !== "string" ||
+          typeof target.trashed !== "string"
+        )
+      ) {
+        return fail("manifest schema is invalid");
+      }
+
+      const requested = params.paths
+        ? new Set(unique(params.paths.map((value) => normalizeRelative(value.trim())).filter(Boolean)))
+        : null;
+      const known = new Set(manifest.targets.map((target) => normalizeRelative(target.original)));
+      if (requested) {
+        const unknown = [...requested].find((target) => !known.has(target));
+        if (unknown) return fail(`requested path is not present in the manifest: ${unknown}`);
+      }
+
+      const selected = manifest.targets.filter((target) => {
+        if (requested) return requested.has(normalizeRelative(target.original));
+        return fs.existsSync(path.resolve(cwd, target.trashed));
+      });
+      if (selected.length === 0) {
+        return fail(requested ? "no manifest targets were selected" : "manifest has no remaining targets");
+      }
+      if (selected.length > config.maxExplicitTargets) {
+        return fail(`selected ${selected.length} targets; maximum is ${config.maxExplicitTargets}`);
+      }
+
+      const restorations: Array<{
+        original: string;
+        trashed: string;
+        originalAbsolute: string;
+        trashedAbsolute: string;
+      }> = [];
+      for (const target of selected) {
+        const original = normalizeRelative(target.original);
+        const trashed = normalizeRelative(target.trashed);
+        const originalAbsolute = path.resolve(cwd, original);
+        const trashedAbsolute = path.resolve(cwd, trashed);
+        const resolvedOriginal = resolveRealTarget(original, cwd);
+        if (
+          !original ||
+          original === "." ||
+          path.isAbsolute(target.original) ||
+          !isInside(cwd, originalAbsolute) ||
+          !isInside(cwd, resolvedOriginal)
+        ) {
+          return fail(`manifest original path is unsafe: ${target.original}`);
+        }
+        if (!isInside(trashBase, trashedAbsolute)) {
+          return fail(`manifest trash path escapes the managed trash: ${target.trashed}`);
+        }
+        if (!fs.existsSync(trashedAbsolute)) {
+          return fail(`trashed source no longer exists: ${trashed}`);
+        }
+        if (!isInside(realTrashBase, fs.realpathSync.native(path.dirname(trashedAbsolute)))) {
+          return fail(`manifest trash parent escapes the managed trash: ${target.trashed}`);
+        }
+        if (fs.existsSync(originalAbsolute)) {
+          return fail(`restore destination already exists: ${original}`);
+        }
+        const protectedPattern =
+          matchesPathPattern(original, config.noDeletePaths) ??
+          matchesPathPattern(original, config.protectedPaths);
+        if (protectedPattern) {
+          return fail(`restore destination is protected by ${protectedPattern}: ${original}`);
+        }
+        restorations.push({ original, trashed, originalAbsolute, trashedAbsolute });
+      }
+
+      if (!ctx.hasUI) {
+        return fail("interactive approval is required");
+      }
+      const approved = await ctx.ui.confirm(
+        "Restore targets from recoverable trash?",
+        [
+          `Reason:\n  ${redactText(params.reason).text}`,
+          "Exact mappings:",
+          ...restorations.map((item) => `  ${item.trashed}\n    -> ${item.original}`),
+          "",
+          "Continue?",
+        ].join("\n"),
+      );
+      if (!approved) {
+        blockedTotal += 1;
+        audit("safe-restore-declined", {
+          manifest: normalizeRelative(path.relative(cwd, manifestPath)),
+          targets: restorations.map((item) => item.original),
+        });
+        return {
+          content: [{ type: "text" as const, text: "safe_restore was declined by the user." }],
+          details: { restored: [] },
+        };
+      }
+
+      const restored: TrashManifestTarget[] = [];
+      try {
+        for (const item of restorations) {
+          fs.mkdirSync(path.dirname(item.originalAbsolute), { recursive: true });
+          fs.renameSync(item.trashedAbsolute, item.originalAbsolute);
+          restored.push({ original: item.original, trashed: item.trashed });
+        }
+        manifest.restorations = [
+          ...(Array.isArray(manifest.restorations) ? manifest.restorations : []),
+          {
+            timestamp: new Date().toISOString(),
+            reason: redactText(params.reason).text,
+            targets: restored,
+          },
+        ];
+        fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
+          encoding: "utf8",
+          mode: 0o600,
+        });
+      } catch (error) {
+        const rollbackErrors: string[] = [];
+        for (const item of [...restored].reverse()) {
+          try {
+            const originalAbsolute = path.resolve(cwd, item.original);
+            const trashedAbsolute = path.resolve(cwd, item.trashed);
+            fs.mkdirSync(path.dirname(trashedAbsolute), { recursive: true });
+            fs.renameSync(originalAbsolute, trashedAbsolute);
+          } catch (rollbackError) {
+            rollbackErrors.push(
+              rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+            );
+          }
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        blockedTotal += 1;
+        audit("safe-restore-failed", {
+          error: redactText(message).text,
+          rollbackErrors: rollbackErrors.map((value) => redactText(value).text),
+        });
+        return {
+          content: [{
+            type: "text" as const,
+            text:
+              `safe_restore failed and attempted rollback: ${redactText(message).text}` +
+              (rollbackErrors.length ? `\nRollback errors: ${rollbackErrors.length}` : ""),
+          }],
+          details: { restored: [], rolledBack: rollbackErrors.length === 0 },
+        };
+      }
+
+      approvedTotal += 1;
+      audit("safe-restore-complete", {
+        manifest: normalizeRelative(path.relative(cwd, manifestPath)),
+        targets: restored.map((item) => item.original),
+      });
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Restored ${restored.length} target(s) from recoverable trash.`,
+        }],
+        details: { restored },
+      };
+    },
+  });
+
   pi.registerCommand("safe", {
     description: "Show pi-safe-operation status and session counters",
     handler: async (_args, ctx) => {
@@ -1096,6 +1508,52 @@ export default function (pi: ExtensionAPI) {
           `recoverable delete: ${config.recoverableDelete ? "enabled" : "disabled"}`,
         ].join("\n"),
         "info",
+      );
+    },
+  });
+
+  pi.registerCommand("safe-update-check", {
+    description: "Check whether the installed pi-packages Git source is behind origin/main",
+    handler: async (_args, ctx) => {
+      if (!fs.existsSync(path.join(packageRepositoryRoot, ".git"))) {
+        ctx.ui.notify(
+          "pi-safe-operation is not running from a Git package checkout. Use Pi's package manager to check npm updates.",
+          "info",
+        );
+        return;
+      }
+      const local = await pi.exec("git", ["-C", packageRepositoryRoot, "rev-parse", "HEAD"]);
+      if (local.code !== 0 || !local.stdout.trim()) {
+        ctx.ui.notify("Unable to read the installed pi-packages commit.", "error");
+        return;
+      }
+      const remote = await pi.exec("git", [
+        "-C",
+        packageRepositoryRoot,
+        "ls-remote",
+        "origin",
+        "refs/heads/main",
+      ]);
+      if (remote.code !== 0 || !remote.stdout.trim()) {
+        ctx.ui.notify(
+          `Unable to check pi-packages origin/main: ${redactText(remote.stderr || "unknown error").text}`,
+          "error",
+        );
+        return;
+      }
+      const localCommit = local.stdout.trim().split(/\s+/)[0];
+      const remoteCommit = remote.stdout.trim().split(/\s+/)[0];
+      if (localCommit === remoteCommit) {
+        ctx.ui.notify(`pi-packages is current (${localCommit.slice(0, 8)}).`, "info");
+        return;
+      }
+      ctx.ui.notify(
+        [
+          `pi-packages update available: ${localCommit.slice(0, 8)} -> ${remoteCommit.slice(0, 8)}`,
+          "Run:",
+          "pi update --extension git:github.com/simplecyon/pi-packages",
+        ].join("\n"),
+        "warning",
       );
     },
   });

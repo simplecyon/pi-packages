@@ -37,14 +37,20 @@ Restart Pi after installation.
   permission changes, disk operations, and package removal require approval.
 - `safe_delete(paths, reason)` moves approved project targets to
   `.trash/pi-safe-operation/<timestamp>/` and writes a recovery manifest.
+- `safe_trash_list(limit?)` lists valid manifests and remaining targets.
+- `safe_restore(manifest, paths?, reason)` restores approved targets
+  transactionally and never overwrites an existing destination.
 - Private-key reads are blocked.
-- Text from `read`, `bash`, `grep`, custom tools, context, and provider payloads
-  is deterministically redacted locally.
+- The built-in Bash tool is wrapped so partial streaming updates and final
+  results are redacted before runtime rendering; `read`, `grep`, custom tools,
+  context, and provider payloads receive additional deterministic local passes.
 - Repeated occurrences of one secret receive the same session-scoped HMAC
   fingerprint without exposing the original value or a reusable hash.
 - Print and JSON modes fail closed whenever interactive approval is required.
 
-Run `/safe` to view session counters.
+Run `/safe` to view session counters. Git-package installs can run
+`/safe-update-check` to compare the installed checkout with `origin/main`
+without changing package state.
 
 ## Project configuration
 
@@ -74,12 +80,17 @@ An optional user baseline can be stored at
 rules, but cannot disable the user's redaction boundary or raise destructive
 operation limits.
 
+`balanced` gates operations based on their resolved risk. `strict` additionally
+requires approval for ordinary write/edit and mutating Bash calls, and rejects
+raw project deletion in favor of `safe_delete`.
+
 ## Security boundary
 
-The extension runs inside Pi and is not an OS sandbox. V1 guarantees that
-sanitized final tool results and provider payloads reach the model. Bash
-streaming updates may still briefly display raw output in the local TUI before
-the final result is redacted.
+The extension runs inside Pi and is not an OS sandbox. It sanitizes Bash
+streaming updates, final tool results, context, and provider payloads. When the
+built-in Bash output is truncated, Pi's local temporary full-output file may
+still contain the original bytes; that file is not sent to the model, but disk
+encryption and host access remain outside this extension's boundary.
 
 Secret detection is deterministic and local; it never sends raw data to
 another model or network service.

@@ -12,6 +12,8 @@ async function loadSafeOperation(cwd: string) {
   const tools = new Map<string, { definition: any }>();
   const commands = new Map<string, unknown>();
   const entries: Array<{ customType: string; data: unknown }> = [];
+  const busHandlers = new Map<string, Array<(data: unknown) => void>>();
+  const emitted: Array<{ channel: string; data: unknown }> = [];
   const pi = {
     on(name: string, handler: (...args: any[]) => any) {
       const list = handlers.get(name) ?? [];
@@ -27,6 +29,18 @@ async function loadSafeOperation(cwd: string) {
     appendEntry(customType: string, data: unknown) {
       entries.push({ customType, data });
     },
+    events: {
+      on(channel: string, handler: (data: unknown) => void) {
+        const list = busHandlers.get(channel) ?? [];
+        list.push(handler);
+        busHandlers.set(channel, list);
+        return () => {};
+      },
+      emit(channel: string, data: unknown) {
+        emitted.push({ channel, data });
+        for (const handler of busHandlers.get(channel) ?? []) handler(data);
+      },
+    },
     async exec(command: string, args: string[]) {
       const result = spawnSync(command, args, { cwd, encoding: "utf8" });
       return {
@@ -37,7 +51,7 @@ async function loadSafeOperation(cwd: string) {
     },
   } as unknown as ExtensionAPI;
   safeOperation(pi);
-  return { handlers, tools, commands, entries };
+  return { handlers, tools, commands, entries, pi, emitted };
 }
 
 function baseContext(cwd: string, hasUI = false) {
@@ -46,6 +60,12 @@ function baseContext(cwd: string, hasUI = false) {
     hasUI,
     mode: hasUI ? "tui" : "print",
     isProjectTrusted: () => true,
+    sessionManager: {
+      getSessionId: () => "safe-operation-test-session",
+      getSessionFile: () => undefined,
+    },
+    model: undefined,
+    thinkingLevel: undefined,
     ui: {
       confirm: async () => false,
       input: async () => undefined,
@@ -70,6 +90,54 @@ test("blocks the real mixed screenshot and node_modules compound deletion", asyn
     assert.match(result?.reason ?? "", /standalone command/);
     assert.match(result?.reason ?? "", /node_modules\//);
     assert.match(result?.reason ?? "", /\.readwise-config\.json/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("announces a redacted tool-result capability for dependent extensions", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-capability-"));
+  try {
+    const extension = await loadSafeOperation(tmp);
+    assert.deepEqual(extension.emitted[0], {
+      channel: "simplecyon:safe-operation:available",
+      data: {
+        owner: "@simplecyon/pi-safe-operation",
+        protocolVersion: 1,
+        redactsToolResults: true,
+      },
+    });
+    extension.pi.events.emit("simplecyon:safe-operation:discover", {});
+    assert.equal(
+      extension.emitted.filter((event) => event.channel === "simplecyon:safe-operation:available").length,
+      2,
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("defers the Bash override when another extension owns the redaction bridge", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-bash-owner-"));
+  try {
+    const extension = await loadSafeOperation(tmp);
+    extension.pi.events.emit("simplecyon:bash-redaction-owner:available", {
+      owner: "@simplecyon/pi-minimal-tui",
+      protocolVersion: 1,
+    });
+    const sessionStart = extension.handlers.get("session_start")?.[0];
+    assert.ok(sessionStart);
+    await sessionStart({ type: "session_start", reason: "startup" }, baseContext(tmp));
+    assert.equal(extension.tools.has("bash"), false);
+
+    const secret = ["xoxb", "1234567890", "bridgefixture"].join("-");
+    const request = {
+      value: { content: [{ type: "text", text: `TOKEN=${secret}` }] },
+      phase: "stream",
+    };
+    extension.pi.events.emit("simplecyon:safe-operation:redact", request);
+    assert.doesNotMatch(JSON.stringify(request.value), new RegExp(secret));
+    assert.match(JSON.stringify(request.value), /<redacted:/);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -230,6 +298,57 @@ test("project config cannot disable the redaction boundary", async () => {
     const serialized = JSON.stringify(result);
     assert.doesNotMatch(serialized, new RegExp(secret));
     assert.match(serialized, /<redacted:/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("strict mode requires safe_delete and gates otherwise ordinary mutations", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-strict-"));
+  try {
+    fs.mkdirSync(path.join(tmp, ".pi"));
+    fs.writeFileSync(
+      path.join(tmp, ".pi", "safe-operation.json"),
+      JSON.stringify({ mode: "strict" }),
+    );
+    fs.writeFileSync(path.join(tmp, "victim.txt"), "keep");
+    const extension = await loadSafeOperation(tmp);
+    const sessionStart = extension.handlers.get("session_start")?.[0];
+    const toolCall = extension.handlers.get("tool_call")?.[0];
+    assert.ok(sessionStart);
+    assert.ok(toolCall);
+    await sessionStart({ type: "session_start", reason: "startup" }, baseContext(tmp, true));
+
+    const deletion = await toolCall(
+      {
+        type: "tool_call",
+        toolName: "bash",
+        toolCallId: "strict-delete",
+        input: { command: "rm victim.txt" },
+      },
+      {
+        ...baseContext(tmp, true),
+        ui: {
+          confirm: async () => true,
+          input: async () => undefined,
+          notify: () => {},
+        },
+      },
+    );
+    assert.equal(deletion?.block, true);
+    assert.match(deletion?.reason ?? "", /Strict mode requires safe_delete/);
+
+    const write = await toolCall(
+      {
+        type: "tool_call",
+        toolName: "write",
+        toolCallId: "strict-write",
+        input: { path: "new.txt", content: "new" },
+      },
+      baseContext(tmp),
+    );
+    assert.equal(write?.block, true);
+    assert.match(write?.reason ?? "", /strict mode/);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -412,6 +531,34 @@ test("redacts the final provider payload", async () => {
   }
 });
 
+test("redacts Bash streaming updates before they reach the runtime renderer", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-stream-"));
+  try {
+    const extension = await loadSafeOperation(tmp);
+    const sessionStart = extension.handlers.get("session_start")?.[0];
+    assert.ok(sessionStart);
+    await sessionStart({ type: "session_start", reason: "startup" }, baseContext(tmp));
+
+    const bash = extension.tools.get("bash");
+    assert.ok(bash);
+    const secret = ["xoxb", "1234567890", "streamingfixture"].join("-");
+    const updates: unknown[] = [];
+    const result = await bash.definition.execute(
+      "bash-stream",
+      { command: `printf 'TOKEN=${secret}'` },
+      undefined,
+      (partial: unknown) => updates.push(partial),
+      baseContext(tmp),
+    );
+
+    const serialized = JSON.stringify({ updates, result });
+    assert.doesNotMatch(serialized, new RegExp(secret));
+    assert.match(serialized, /<redacted:/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("safe_delete moves an approved target to recoverable trash with manifest", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-trash-"));
   try {
@@ -449,6 +596,113 @@ test("safe_delete moves an approved target to recoverable trash with manifest", 
     assert.equal(manifests.length, 1);
     assert.equal(fs.existsSync(manifests[0]), true);
     assert.match(JSON.stringify(result), /Moved 1 target/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("lists and restores a recoverable deletion without overwriting destinations", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-restore-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: tmp });
+    fs.writeFileSync(path.join(tmp, "screenshot.png"), "image");
+    const extension = await loadSafeOperation(tmp);
+    const sessionStart = extension.handlers.get("session_start")?.[0];
+    assert.ok(sessionStart);
+    const interactiveContext = {
+      ...baseContext(tmp, true),
+      ui: {
+        confirm: async () => true,
+        input: async () => undefined,
+        notify: () => {},
+      },
+    };
+    await sessionStart({ type: "session_start", reason: "startup" }, interactiveContext);
+
+    const safeDelete = extension.tools.get("safe_delete");
+    const safeList = extension.tools.get("safe_trash_list");
+    const safeRestore = extension.tools.get("safe_restore");
+    assert.ok(safeDelete);
+    assert.ok(safeList);
+    assert.ok(safeRestore);
+
+    const deleted = await safeDelete.definition.execute(
+      "safe-delete",
+      { paths: ["screenshot.png"], reason: "User requested screenshot cleanup" },
+      undefined,
+      undefined,
+      interactiveContext,
+    );
+    const manifest = deleted.details.trashRoot + "/manifest.json";
+    const listed = await safeList.definition.execute(
+      "safe-list",
+      { limit: 10 },
+      undefined,
+      undefined,
+      interactiveContext,
+    );
+    assert.match(JSON.stringify(listed), /screenshot cleanup/);
+    assert.match(JSON.stringify(listed), /remaining\":1/);
+
+    fs.writeFileSync(path.join(tmp, "screenshot.png"), "replacement");
+    const collision = await safeRestore.definition.execute(
+      "safe-restore-collision",
+      { manifest, reason: "Restore the screenshot" },
+      undefined,
+      undefined,
+      interactiveContext,
+    );
+    assert.match(JSON.stringify(collision), /destination already exists/);
+    assert.equal(fs.readFileSync(path.join(tmp, "screenshot.png"), "utf8"), "replacement");
+
+    fs.unlinkSync(path.join(tmp, "screenshot.png"));
+    const restored = await safeRestore.definition.execute(
+      "safe-restore",
+      { manifest, paths: ["screenshot.png"], reason: "Restore the screenshot" },
+      undefined,
+      undefined,
+      interactiveContext,
+    );
+    assert.match(JSON.stringify(restored), /Restored 1 target/);
+    assert.equal(fs.readFileSync(path.join(tmp, "screenshot.png"), "utf8"), "image");
+    const parsedManifest = JSON.parse(fs.readFileSync(path.join(tmp, manifest), "utf8"));
+    assert.equal(parsedManifest.restorations.length, 1);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("rejects a trash manifest symlink that escapes the managed trash", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-restore-symlink-"));
+  try {
+    const trashEntry = path.join(tmp, ".trash", "pi-safe-operation", "fixture");
+    fs.mkdirSync(trashEntry, { recursive: true });
+    const outsideManifest = path.join(tmp, "outside-manifest.json");
+    fs.writeFileSync(outsideManifest, JSON.stringify({
+      version: 1,
+      timestamp: new Date().toISOString(),
+      reason: "tampered",
+      targets: [],
+    }));
+    fs.symlinkSync(outsideManifest, path.join(trashEntry, "manifest.json"));
+
+    const extension = await loadSafeOperation(tmp);
+    const sessionStart = extension.handlers.get("session_start")?.[0];
+    assert.ok(sessionStart);
+    await sessionStart({ type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const safeRestore = extension.tools.get("safe_restore");
+    assert.ok(safeRestore);
+    const result = await safeRestore.definition.execute(
+      "safe-restore-symlink",
+      {
+        manifest: ".trash/pi-safe-operation/fixture/manifest.json",
+        reason: "Attempt restore",
+      },
+      undefined,
+      undefined,
+      baseContext(tmp, true),
+    );
+    assert.match(JSON.stringify(result), /manifest symlinks/);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
