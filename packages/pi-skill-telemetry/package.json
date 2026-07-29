@@ -1,0 +1,39 @@
+{
+  "name": "@cyon/pi-skill-telemetry",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Privacy-preserving local skill telemetry for Pi with immutable segments for agent-sync",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "skills",
+    "telemetry"
+  ],
+  "license": "MIT",
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.82.1 <0.83.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.82.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

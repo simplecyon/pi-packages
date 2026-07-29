@@ -1,29 +1,19 @@
 {
-  "name": "pi-minimal-tui",
-  "version": "0.2.0",
+  "name": "@cyon/pi-memory",
+  "version": "0.1.0",
+  "private": true,
   "type": "module",
-  "description": "Compact, background-free TUI rendering for Pi built-in tools",
+  "description": "Package-only scoped MEMORY.md injection for Pi",
   "keywords": [
     "pi-package",
     "pi-extension",
-    "tui",
-    "theme"
+    "memory",
+    "context"
   ],
-  "repository": {
-    "type": "git",
-    "url": "git+ssh://git@github.com/simplecyon/pi-packages.git",
-    "directory": "packages/pi-minimal-tui"
-  },
-  "homepage": "https://github.com/simplecyon/pi-packages/tree/main/packages/pi-minimal-tui#readme",
-  "bugs": {
-    "url": "https://github.com/simplecyon/pi-packages/issues"
-  },
   "license": "MIT",
   "files": [
     "src",
-    "themes",
-    "README.md",
-    "LICENSE"
+    "README.md"
   ],
   "scripts": {
     "test": "node --experimental-strip-types --test tests/*.test.ts",
@@ -33,9 +23,6 @@
   "pi": {
     "extensions": [
       "./src/index.ts"
-    ],
-    "themes": [
-      "./themes"
     ]
   },
   "peerDependencies": {

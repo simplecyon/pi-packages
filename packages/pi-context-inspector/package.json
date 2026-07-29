@@ -1,29 +1,21 @@
 {
-  "name": "pi-minimal-tui",
-  "version": "0.2.0",
+  "name": "@cyon/pi-context-inspector",
+  "version": "0.1.0",
+  "private": true,
   "type": "module",
-  "description": "Compact, background-free TUI rendering for Pi built-in tools",
+  "description": "Categorized /context diagnostics for Pi sessions",
   "keywords": [
     "pi-package",
     "pi-extension",
-    "tui",
-    "theme"
+    "context",
+    "tokens"
   ],
-  "repository": {
-    "type": "git",
-    "url": "git+ssh://git@github.com/simplecyon/pi-packages.git",
-    "directory": "packages/pi-minimal-tui"
-  },
-  "homepage": "https://github.com/simplecyon/pi-packages/tree/main/packages/pi-minimal-tui#readme",
-  "bugs": {
-    "url": "https://github.com/simplecyon/pi-packages/issues"
-  },
   "license": "MIT",
   "files": [
-    "src",
-    "themes",
+    "index.ts",
     "README.md",
-    "LICENSE"
+    "REQUIREMENTS.md",
+    "RESEARCH.md"
   ],
   "scripts": {
     "test": "node --experimental-strip-types --test tests/*.test.ts",
@@ -32,10 +24,7 @@
   },
   "pi": {
     "extensions": [
-      "./src/index.ts"
-    ],
-    "themes": [
-      "./themes"
+      "./index.ts"
     ]
   },
   "peerDependencies": {
