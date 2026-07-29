@@ -116,6 +116,13 @@ const DEFAULT_CONFIG: SafeOperationConfig = {
   },
 };
 
+const NON_CIRCUMVENTION_GUIDELINE =
+  "Treat a safety decision as a constraint on the intended effect, not only on one tool call. " +
+  "After an operation is blocked or declined, do not retry, translate, decompose, delegate, or recommend " +
+  "another mechanism that would achieve substantially the same effect. Continue only when the proposed action " +
+  "materially narrows the scope or removes the stated risk, or, after a user decline rather than a policy block, " +
+  "the user provides fresh explicit authorization; otherwise explain the boundary and stop.";
+
 const CODE_EXTENSIONS = new Set([
   ".py", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".jsx", ".tsx",
   ".json", ".yaml", ".yml", ".sql", ".vue", ".svelte", ".sh", ".bash",
@@ -1043,6 +1050,7 @@ export default function (pi: ExtensionAPI) {
     }, { additionalProperties: false }),
     promptSnippet: "safe_delete(paths: string[], reason: string) → recoverably move explicit project targets to trash",
     promptGuidelines: [
+      NON_CIRCUMVENTION_GUIDELINE,
       "Use safe_delete instead of rm when deleting project files or directories.",
       "safe_delete authorization is target-scoped: include only paths explicitly named by the user or unambiguously inside the requested class.",
       "Never add opportunistic cleanup targets to safe_delete; use a separate proposed action for unrelated targets.",

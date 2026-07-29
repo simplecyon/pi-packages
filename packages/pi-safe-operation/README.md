@@ -35,6 +35,13 @@ Restart Pi after installation.
   and must be split.
 - Permanent deletion, destructive Git actions, privilege escalation, recursive
   permission changes, disk operations, and package removal require approval.
+- Safety decisions constrain the intended effect, not merely one tool call.
+  Agent guidance prohibits retrying, translating, decomposing, delegating, or
+  recommending a substantially equivalent operation after it is blocked or
+  declined. A new action may proceed only when it materially narrows the scope
+  or removes the stated risk. A fresh explicit authorization may resume an
+  approval-gated action after the user declined it, but cannot override a policy
+  block.
 - `safe_delete(paths, reason)` moves approved project targets to
   `.trash/pi-safe-operation/<timestamp>/` and writes a recovery manifest.
 - `safe_trash_list(limit?)` lists valid manifests and remaining targets.

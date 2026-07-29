@@ -95,6 +95,26 @@ test("blocks the real mixed screenshot and node_modules compound deletion", asyn
   }
 });
 
+test("publishes effect-level non-circumvention guidance without path or command special cases", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-guidance-"));
+  try {
+    const extension = await loadSafeOperation(tmp);
+    const safeDelete = extension.tools.get("safe_delete")?.definition;
+    assert.ok(safeDelete);
+    const guideline = safeDelete.promptGuidelines.find((value: string) =>
+      value.includes("constraint on the intended effect")
+    );
+    assert.ok(guideline);
+    assert.match(guideline, /do not retry, translate, decompose, delegate, or recommend/i);
+    assert.match(guideline, /materially narrows the scope or removes the stated risk/i);
+    assert.match(guideline, /after a user decline rather than a policy block/i);
+    assert.match(guideline, /fresh explicit authorization/i);
+    assert.doesNotMatch(guideline, /\brm\b|\.pi/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("announces a redacted tool-result capability for dependent extensions", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-capability-"));
   try {
