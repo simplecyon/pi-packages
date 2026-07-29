@@ -15,6 +15,7 @@ import { ActionGroupCoordinator } from "./grouping.ts";
 import { formatErrorOutcome } from "./outcome.ts";
 import { formatToolSummary } from "./summary.ts";
 import { MinimalToolCallComponent, MinimalToolResultComponent } from "./render.ts";
+import { installCompactUserMessageRendering } from "./user-message.ts";
 
 interface MinimalRendererState {
 	callInner?: ReturnType<NonNullable<ToolDefinition["renderCall"]>>;
@@ -123,6 +124,7 @@ export function createMinimalToolDefinitions(
 }
 
 export default function minimalTuiExtension(pi: ExtensionAPI): void {
+	installCompactUserMessageRendering();
 	const cwd = process.cwd();
 	const grouping = new ActionGroupCoordinator();
 
