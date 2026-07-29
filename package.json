@@ -1,0 +1,42 @@
+{
+  "name": "@cyon/pi-packages",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cyon's package-only extensions and themes for Pi",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-theme"
+  ],
+  "license": "MIT",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "check": "npm run check --workspaces --if-present && npm run test:integration",
+    "test:integration": "node --test tests/*.test.mjs"
+  },
+  "pi": {
+    "extensions": [
+      "./packages/pi-minimal-tui/src/index.ts",
+      "./packages/pi-memory/src/index.ts",
+      "./packages/pi-context-compact/src/index.ts",
+      "./packages/pi-context-inspector/index.ts",
+      "./packages/pi-session-tasks/src/index.ts",
+      "./packages/pi-skill-telemetry/src/index.ts"
+    ],
+    "themes": [
+      "./packages/pi-minimal-tui/themes"
+    ]
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.82.1",
+    "@earendil-works/pi-tui": "0.82.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
