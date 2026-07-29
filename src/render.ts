@@ -2,6 +2,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ToolSummary } from "./summary.ts";
+import type { GroupView } from "./grouping.ts";
 
 const SGR_PATTERN = /\x1b\[([0-9;]*)m/g;
 const ANSI_PATTERN = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g;
@@ -57,11 +58,23 @@ function indentLine(line: string, width: number): string {
 	return truncateToWidth(`  ${stripBackgroundAnsi(line)}`, width);
 }
 
-function summaryLine(summary: ToolSummary, theme: Theme, width: number): string {
-	const bullet = theme.fg("muted", "·");
+function summaryLine(summary: ToolSummary, theme: Theme, width: number, outcome?: string): string {
+	const bullet = summary.bullet === false ? "" : theme.fg("muted", "·");
 	const verb = theme.fg("toolTitle", summary.verb);
 	const detail = summary.detail ? ` ${theme.fg("muted", summary.detail)}` : "";
-	return truncateToWidth(`${bullet}${verb}${detail}`, width);
+	const base = `${bullet}${verb}${detail}`;
+	if (!outcome) return truncateToWidth(base, width);
+
+	const suffix = theme.fg("error", ` × ${outcome}`);
+	const suffixWidth = visibleWidth(suffix);
+	if (suffixWidth >= width) return truncateToWidth(suffix.trimStart(), width);
+	return `${truncateToWidth(base, width - suffixWidth)}${suffix}`;
+}
+
+interface MinimalToolCallOptions {
+	getGroupView?: () => GroupView | undefined;
+	outcome?: string;
+	showInnerCollapsed?: boolean;
 }
 
 export class MinimalToolCallComponent implements Component {
@@ -69,24 +82,42 @@ export class MinimalToolCallComponent implements Component {
 	private inner: Component | undefined;
 	private expanded: boolean;
 	private theme: Theme;
+	private options: MinimalToolCallOptions;
 
-	constructor(summary: ToolSummary, inner: Component | undefined, expanded: boolean, theme: Theme) {
+	constructor(
+		summary: ToolSummary,
+		inner: Component | undefined,
+		expanded: boolean,
+		theme: Theme,
+		options: MinimalToolCallOptions = {},
+	) {
 		this.summary = summary;
 		this.inner = inner;
 		this.expanded = expanded;
 		this.theme = theme;
+		this.options = options;
 	}
 
-	update(summary: ToolSummary, inner: Component | undefined, expanded: boolean, theme: Theme): void {
+	update(
+		summary: ToolSummary,
+		inner: Component | undefined,
+		expanded: boolean,
+		theme: Theme,
+		options: MinimalToolCallOptions = {},
+	): void {
 		this.summary = summary;
 		this.inner = inner;
 		this.expanded = expanded;
 		this.theme = theme;
+		this.options = options;
 	}
 
 	render(width: number): string[] {
-		const lines = [summaryLine(this.summary, this.theme, width)];
-		if (!this.expanded || !this.inner || width <= 0) return lines;
+		const groupView = this.expanded ? undefined : this.options.getGroupView?.();
+		if (groupView?.hidden) return [];
+		const summary = groupView?.summary ?? this.summary;
+		const lines = [summaryLine(summary, this.theme, width, this.options.outcome)];
+		if ((!this.expanded && !this.options.showInnerCollapsed) || !this.inner || width <= 0) return lines;
 
 		const rendered = trimEmptyEdges(this.inner.render(Math.max(1, width - 2)).map(stripBackgroundAnsi));
 		const headerIndex = rendered.findIndex((line) => !visuallyEmpty(line));

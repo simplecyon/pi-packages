@@ -3,6 +3,7 @@ import { basename, dirname, normalize, sep } from "node:path";
 export interface ToolSummary {
 	verb: string;
 	detail?: string;
+	bullet?: boolean;
 }
 
 function stringArg(args: unknown, ...keys: string[]): string | undefined {
