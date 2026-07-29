@@ -4,8 +4,13 @@ const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 const OSC133_ZONE_END_SEQUENCE = OSC133_ZONE_END + OSC133_ZONE_FINAL;
-const ANSI_PATTERN = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g;
+const ANSI_SOURCE = String.raw`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))`;
+const ANSI_PATTERN = new RegExp(ANSI_SOURCE, "g");
+const LEFT_PADDING_PATTERN = new RegExp(`^((?:${ANSI_SOURCE})*) ((?:${ANSI_SOURCE})*)`);
 const PATCH_MARKER = Symbol.for("@simplecyon/pi-minimal-tui/compact-user-message");
+const DIM_ARROW = "\x1b[2m>\x1b[22m ";
+const MEDIUM_TEXT_START = "\x1b[1m";
+const MEDIUM_TEXT_END = "\x1b[22m";
 
 interface PatchableUserMessagePrototype {
 	render(width: number): string[];
@@ -42,13 +47,23 @@ function compactVerticalPadding(lines: string[]): string[] {
 	return compacted;
 }
 
+function styleUserMessageLine(line: string): string {
+	const styled = line.replace(
+		LEFT_PADDING_PATTERN,
+		(_match, controlsBefore: string, controlsAfter: string) =>
+			`${controlsBefore}${DIM_ARROW}${controlsAfter}${MEDIUM_TEXT_START}`,
+	);
+	return styled === line ? line : `${styled}${MEDIUM_TEXT_END}`;
+}
+
 export function installCompactUserMessageRendering(): void {
 	const prototype = UserMessageComponent.prototype as PatchableUserMessagePrototype;
 	if (prototype[PATCH_MARKER]) return;
 
 	const originalRender = prototype.render;
 	prototype.render = function renderCompactUserMessage(width: number): string[] {
-		return compactVerticalPadding(originalRender.call(this, width));
+		const lines = compactVerticalPadding(originalRender.call(this, Math.max(1, width - 1)));
+		return lines.map(styleUserMessageLine);
 	};
 	prototype[PATCH_MARKER] = true;
 }

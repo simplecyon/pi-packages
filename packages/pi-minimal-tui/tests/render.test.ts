@@ -8,6 +8,9 @@ const theme = {
 	fg(_color: string, text: string) {
 		return text;
 	},
+	bold(text: string) {
+		return text;
+	},
 } as Theme;
 
 class StaticComponent implements Component {
@@ -36,6 +39,25 @@ test("collapsed call renders one compact event row", () => {
 		theme,
 	);
 	assert.deepEqual(component.render(80), ["• read docs: extensions.md"]);
+});
+
+test("action event text uses the terminal medium-weight approximation", () => {
+	const weightedTheme = {
+		fg(_color: string, text: string) {
+			return text;
+		},
+		bold(text: string) {
+			return `<medium>${text}</medium>`;
+		},
+	} as Theme;
+	const component = new MinimalToolCallComponent(
+		{ verb: "read", detail: "docs: extensions.md" },
+		undefined,
+		false,
+		weightedTheme,
+	);
+
+	assert.deepEqual(component.render(80), ["• <medium>read docs: extensions.md</medium>"]);
 });
 
 test("expanded state restores an item hidden by its collapsed group", () => {

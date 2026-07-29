@@ -13,7 +13,8 @@ Compact, low-noise rendering for Pi's built-in tool events, plus the
   new batch.
 - A single action keeps its descriptive verb-and-target row.
 - Aggregated and single-action rows share the same larger `• ` marker and text
-  column.
+  column. Event text uses the terminal's bold/semibold face as the closest
+  available approximation to font weight 500.
 - Bash failures stay compact while retaining outcomes such as timeout or exit
   status.
 - Collapsed edits show a high-contrast compact diff with one context line, a
@@ -29,7 +30,8 @@ Compact, low-noise rendering for Pi's built-in tool events, plus the
   diffs.
 - `cyon-minimal-dark` gives user messages a subtle cool-gray highlight while
   keeping tool and custom-message surfaces quiet. User-message highlights omit
-  Pi's default blank row above and below the content for a denser one-line bar.
+  Pi's default blank row above and below the content for a denser one-line bar,
+  add a dim `> ` gutter, and use the same medium-weight approximation as events.
 
 `write` is summarized as a file operation rather than shown as an invented
 diff: Pi's write result does not contain the previous file content.

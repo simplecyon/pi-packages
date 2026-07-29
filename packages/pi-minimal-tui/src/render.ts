@@ -63,7 +63,7 @@ function summaryLine(summary: ToolSummary, theme: Theme, width: number, outcome?
 	const bullet = summary.bullet === false ? "" : theme.fg("muted", "• ");
 	const verb = theme.fg("toolTitle", summary.verb);
 	const detail = summary.detail ? ` ${theme.fg("muted", summary.detail)}` : "";
-	const base = `${bullet}${verb}${detail}`;
+	const base = `${bullet}${theme.bold(`${verb}${detail}`)}`;
 	if (!outcome) return truncateToWidth(base, width);
 
 	const suffix = theme.fg("error", ` × ${outcome}`);
