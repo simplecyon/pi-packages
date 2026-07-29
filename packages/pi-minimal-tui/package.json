@@ -1,0 +1,53 @@
+{
+  "name": "pi-minimal-tui",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Compact, background-free TUI rendering for Pi built-in tools",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "tui",
+    "theme"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/simplecyon/pi-minimal-tui.git"
+  },
+  "homepage": "https://github.com/simplecyon/pi-minimal-tui#readme",
+  "bugs": {
+    "url": "https://github.com/simplecyon/pi-minimal-tui/issues"
+  },
+  "license": "MIT",
+  "files": [
+    "src",
+    "themes",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ],
+    "themes": [
+      "./themes"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.82.1 <0.83.0",
+    "@earendil-works/pi-tui": ">=0.82.1 <0.83.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.82.1",
+    "@earendil-works/pi-tui": "0.82.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
