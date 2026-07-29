@@ -7,7 +7,7 @@ Cyon's package-only extensions and themes for
 
 | Workspace | Package | Purpose |
 | --- | --- | --- |
-| [`packages/pi-minimal-tui`](packages/pi-minimal-tui) | `pi-minimal-tui` | Compact tool-event rendering and the `cyon-minimal-dark` theme |
+| [`packages/pi-minimal-tui`](packages/pi-minimal-tui) | `@cyon/pi-minimal-tui` | Compact tool-event rendering and the `cyon-minimal-dark` theme |
 | [`packages/pi-memory`](packages/pi-memory) | `@cyon/pi-memory` | Cache-stable memory injection with scope-aware progressive disclosure |
 | [`packages/pi-context-compact`](packages/pi-context-compact) | `@cyon/pi-context-compact` | Durable compaction checkpoints and cold-history search |
 | [`packages/pi-context-inspector`](packages/pi-context-inspector) | `@cyon/pi-context-inspector` | `/context` diagnostics for prompt and conversation usage |
@@ -17,7 +17,22 @@ Cyon's package-only extensions and themes for
 `context-mode-cyon` remains outside this repository because it is an upstream
 fork with its own history, build system, and release cadence.
 
-## Install
+## Install separately
+
+Every workspace is an independent public npm package:
+
+```bash
+pi install npm:@cyon/pi-minimal-tui
+pi install npm:@cyon/pi-memory
+pi install npm:@cyon/pi-context-compact
+pi install npm:@cyon/pi-context-inspector
+pi install npm:@cyon/pi-session-tasks
+pi install npm:@cyon/pi-skill-telemetry
+```
+
+Add `-l --approve` to any command for a trusted project-local installation.
+
+## Install the suite
 
 Install the complete suite from GitHub:
 
@@ -37,9 +52,9 @@ For local development:
 pi install -l --approve /absolute/path/to/pi-packages
 ```
 
-The repository root is the aggregate Pi package. Its manifest exposes all six
-extensions and the bundled theme, while every workspace retains an independent
-manifest, version, tests, and compatibility boundary.
+The repository root is an aggregate Git package. Its manifest exposes all six
+extensions and the bundled theme. The npm packages are separate distribution
+units with independent manifests, versions, tests, and compatibility boundaries.
 
 After installation, restart Pi. Use `/theme` to select
 `cyon-minimal-dark`; package commands such as `/memory`, `/context`, `/tasks`,
@@ -58,13 +73,14 @@ This repository uses pnpm workspaces:
 ```bash
 pnpm install --ignore-scripts
 pnpm run check
+pnpm run release:dry-run
 ```
 
 Run one package only:
 
 ```bash
 pnpm --filter @cyon/pi-memory check
-pnpm --filter pi-minimal-tui check
+pnpm --filter @cyon/pi-minimal-tui check
 ```
 
 `pnpm run check` runs every workspace's typecheck and tests, then verifies that
@@ -76,6 +92,9 @@ development dependencies of the workspace. The root pnpm override keeps
 vulnerable transitive development dependencies out of the lockfile even when
 an upstream package publishes an npm shrinkwrap. Pi's Git installer uses
 production-only dependencies when consuming this repository.
+
+See [Releasing packages](docs/releasing.md) for first-publish setup, versioning,
+dry runs, and npm Trusted Publishing.
 
 ## Repository policy
 

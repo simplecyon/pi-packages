@@ -1,0 +1,85 @@
+name: Publish npm package
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Workspace to publish
+        required: true
+        type: choice
+        options:
+          - pi-minimal-tui
+          - pi-memory
+          - pi-context-compact
+          - pi-context-inspector
+          - pi-session-tasks
+          - pi-skill-telemetry
+      tag:
+        description: npm dist-tag
+        required: true
+        default: latest
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-${{ inputs.package }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Set up npm with Trusted Publishing support
+        run: npm install --global npm@11.9.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Verify repository
+        run: |
+          pnpm run check
+          pnpm run release:dry-run
+
+      - name: Validate npm tag
+        env:
+          NPM_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! "$NPM_TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "Invalid npm tag: $NPM_TAG" >&2
+            exit 1
+          fi
+
+      - name: Ensure version is unpublished
+        working-directory: packages/${{ inputs.package }}
+        run: |
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version >/dev/null 2>&1; then
+            echo "$PACKAGE_NAME@$PACKAGE_VERSION is already published" >&2
+            exit 1
+          fi
+
+      - name: Publish package
+        working-directory: packages/${{ inputs.package }}
+        env:
+          NPM_TAG: ${{ inputs.tag }}
+        run: npm publish --access public --provenance --tag "$NPM_TAG"

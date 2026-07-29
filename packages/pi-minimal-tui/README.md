@@ -1,4 +1,4 @@
-# pi-minimal-tui
+# @cyon/pi-minimal-tui
 
 Compact, background-free rendering for Pi's built-in tool events, plus the
 `cyon-minimal-dark` theme.
@@ -27,17 +27,20 @@ diff: Pi's write result does not contain the previous file content.
 
 ## Install
 
-`pi-minimal-tui` now ships from the aggregate monorepo:
+Install only this package:
 
 ```bash
-pi install git:github.com/simplecyon/pi-packages
+pi install npm:@cyon/pi-minimal-tui
 ```
 
 For one trusted project:
 
 ```bash
-pi install git:github.com/simplecyon/pi-packages -l --approve
+pi install npm:@cyon/pi-minimal-tui -l --approve
 ```
+
+The complete suite remains available as
+`git:github.com/simplecyon/pi-packages`.
 
 Restart Pi, then select:
 
@@ -63,8 +66,8 @@ execution. Renderer contracts can still change between Pi minor versions.
 From the monorepo root:
 
 ```bash
-pnpm --filter pi-minimal-tui check
-pi install -l --approve /absolute/path/to/pi-packages
+pnpm --filter @cyon/pi-minimal-tui check
+pi install -l --approve /absolute/path/to/pi-packages/packages/pi-minimal-tui
 ```
 
 See the [repository README](../../README.md) for suite installation and

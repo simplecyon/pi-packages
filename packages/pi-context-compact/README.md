@@ -22,17 +22,26 @@ the `compact_search` tool instead of being replayed into every model request.
 
 ## Install
 
-This package is distributed through the aggregate repository:
+Install only this package:
 
 ```bash
-pi install git:github.com/simplecyon/pi-packages
+pi install npm:@cyon/pi-context-compact
 ```
 
-For local development, load the aggregate package:
+For a trusted project-local installation:
 
 ```bash
-pi install -l --approve /absolute/path/to/pi-packages
+pi install npm:@cyon/pi-context-compact -l --approve
 ```
+
+For local development:
+
+```bash
+pi install -l --approve /absolute/path/to/pi-packages/packages/pi-context-compact
+```
+
+The complete suite remains available as
+`git:github.com/simplecyon/pi-packages`.
 
 ## Storage
 

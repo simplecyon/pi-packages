@@ -23,17 +23,26 @@ components.
 
 ## Install
 
-Install the aggregate package:
+Install only this package:
 
 ```bash
-pi install git:github.com/simplecyon/pi-packages
+pi install npm:@cyon/pi-context-inspector
+```
+
+For a trusted project-local installation:
+
+```bash
+pi install npm:@cyon/pi-context-inspector -l --approve
 ```
 
 For local development:
 
 ```bash
-pi install -l --approve /absolute/path/to/pi-packages
+pi install -l --approve /absolute/path/to/pi-packages/packages/pi-context-inspector
 ```
+
+The complete suite remains available as
+`git:github.com/simplecyon/pi-packages`.
 
 Then run:
 

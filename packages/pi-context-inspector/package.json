@@ -1,7 +1,6 @@
 {
   "name": "@cyon/pi-context-inspector",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Categorized /context diagnostics for Pi sessions",
   "keywords": [
@@ -11,11 +10,25 @@
     "tokens"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/simplecyon/pi-packages.git",
+    "directory": "packages/pi-context-inspector"
+  },
+  "homepage": "https://github.com/simplecyon/pi-packages/tree/main/packages/pi-context-inspector#readme",
+  "bugs": {
+    "url": "https://github.com/simplecyon/pi-packages/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "files": [
     "index.ts",
     "README.md",
     "REQUIREMENTS.md",
-    "RESEARCH.md"
+    "RESEARCH.md",
+    "LICENSE"
   ],
   "scripts": {
     "test": "node --experimental-strip-types --test tests/*.test.ts",

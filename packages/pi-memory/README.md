@@ -42,17 +42,26 @@ Each file appears once in the active context epoch.
 
 ## Install
 
-Install the aggregate package:
+Install only this package:
 
 ```bash
-pi install git:github.com/simplecyon/pi-packages
+pi install npm:@cyon/pi-memory
 ```
 
-For a trusted local project:
+For a trusted project-local installation:
 
 ```bash
-pi install -l --approve /absolute/path/to/pi-packages
+pi install npm:@cyon/pi-memory -l --approve
 ```
+
+For local development:
+
+```bash
+pi install -l --approve /absolute/path/to/pi-packages/packages/pi-memory
+```
+
+The complete suite remains available as
+`git:github.com/simplecyon/pi-packages`.
 
 ## Commands
 

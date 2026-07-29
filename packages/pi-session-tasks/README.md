@@ -26,17 +26,26 @@ for one-step edits.
 
 ## Install
 
-Install the aggregate package:
+Install only this package:
 
 ```bash
-pi install git:github.com/simplecyon/pi-packages
+pi install npm:@cyon/pi-session-tasks
+```
+
+For a trusted project-local installation:
+
+```bash
+pi install npm:@cyon/pi-session-tasks -l --approve
 ```
 
 For local development:
 
 ```bash
-pi install -l --approve /absolute/path/to/pi-packages
+pi install -l --approve /absolute/path/to/pi-packages/packages/pi-session-tasks
 ```
+
+The complete suite remains available as
+`git:github.com/simplecyon/pi-packages`.
 
 ## User command
 

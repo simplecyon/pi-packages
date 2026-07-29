@@ -16,7 +16,8 @@
   ],
   "scripts": {
     "check": "pnpm -r --if-present run check && pnpm run test:integration",
-    "test:integration": "node --test tests/*.test.mjs"
+    "test:integration": "node --test tests/*.test.mjs",
+    "release:dry-run": "node scripts/release-dry-run.mjs"
   },
   "pi": {
     "extensions": [

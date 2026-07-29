@@ -1,7 +1,6 @@
 {
   "name": "@cyon/pi-memory",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Package-only scoped MEMORY.md injection for Pi",
   "keywords": [
@@ -11,9 +10,23 @@
     "context"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/simplecyon/pi-packages.git",
+    "directory": "packages/pi-memory"
+  },
+  "homepage": "https://github.com/simplecyon/pi-packages/tree/main/packages/pi-memory#readme",
+  "bugs": {
+    "url": "https://github.com/simplecyon/pi-packages/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "files": [
     "src",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "test": "node --experimental-strip-types --test tests/*.test.ts",

@@ -1,5 +1,5 @@
 {
-  "name": "pi-minimal-tui",
+  "name": "@cyon/pi-minimal-tui",
   "version": "0.3.0",
   "type": "module",
   "description": "Compact, background-free TUI rendering for Pi built-in tools",
@@ -11,12 +11,16 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/simplecyon/pi-packages.git",
+    "url": "git+https://github.com/simplecyon/pi-packages.git",
     "directory": "packages/pi-minimal-tui"
   },
   "homepage": "https://github.com/simplecyon/pi-packages/tree/main/packages/pi-minimal-tui#readme",
   "bugs": {
     "url": "https://github.com/simplecyon/pi-packages/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "license": "MIT",
   "files": [
