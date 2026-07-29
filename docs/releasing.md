@@ -25,7 +25,13 @@ cd packages/pi-memory
 npm publish --access public
 ```
 
-Repeat the final command for the other seven workspaces.
+Publish `pi-context-core` before its dependent `pi-context-artifacts`,
+`pi-token-roi`, and `pi-session-tasks` packages, then repeat the final command
+for the other workspaces.
+
+The three dependent packages also declare `pi-context-core` in
+`bundledDependencies`, as required by Pi's isolated package module roots. The
+release dry run allows only that explicitly declared `node_modules` subtree.
 
 ## Trusted Publishing
 
@@ -37,7 +43,7 @@ After a package exists on npm, configure its npm Trusted Publisher:
 - Workflow: `publish-package.yml`
 - Environment: `npm`
 
-Configure all eight packages. The workflow uses GitHub OIDC and does not require a
+Configure all eleven packages. The workflow uses GitHub OIDC and does not require a
 long-lived `NPM_TOKEN`.
 
 ## Publishing a new version
@@ -66,6 +72,9 @@ The workflow refuses to publish a version that is already present on npm.
 | `pi-memory` | `@simplecyon/pi-memory` |
 | `pi-safe-operation` | `@simplecyon/pi-safe-operation` |
 | `pi-context-compact` | `@simplecyon/pi-context-compact` |
+| `pi-context-artifacts` | `@simplecyon/pi-context-artifacts` |
+| `pi-context-core` | `@simplecyon/pi-context-core` |
 | `pi-context-inspector` | `@simplecyon/pi-context-inspector` |
+| `pi-token-roi` | `@simplecyon/pi-token-roi` |
 | `pi-session-tasks` | `@simplecyon/pi-session-tasks` |
 | `pi-skill-telemetry` | `@simplecyon/pi-skill-telemetry` |

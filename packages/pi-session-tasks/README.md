@@ -20,6 +20,9 @@ external project tracker.
 - An empty replacement clears the list.
 - Session reconstruction accepts older snapshots but validates stored render
   details before using them.
+- Each accepted transition to `completed` emits a low-cardinality
+  `session_task_completed` Token ROI milestone. Task IDs and titles are not
+  included in that event.
 
 Use structured tasks for work with several meaningful steps, not as overhead
 for one-step edits.

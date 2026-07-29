@@ -10,7 +10,6 @@ import type {
 	ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import contextCompactExtension from "../src/index.ts";
-import { CAPABILITY_AVAILABLE, CAPABILITY_DISCOVER } from "../src/types.ts";
 
 test("registers compact_search and provides custom compaction after durable storage", async () => {
 	const root = await mkdtemp(join(tmpdir(), "pi-context-compact-extension-"));
@@ -20,14 +19,19 @@ test("registers compact_search and provides custom compaction after durable stor
 	const handlers = new Map<string, (...args: any[]) => unknown>();
 	const tools: ToolDefinition[] = [];
 	const busHandlers = new Map<string, Array<(data: unknown) => void>>();
-	const emitted: string[] = [];
 	const notifications: Array<{ message: string; level: string }> = [];
+	let activeTools: string[] = [];
 	const pi = {
 		on(name: string, handler: (...args: any[]) => unknown) {
 			handlers.set(name, handler);
 		},
 		registerTool(tool: ToolDefinition) {
 			tools.push(tool);
+			activeTools.push(tool.name);
+		},
+		getActiveTools: () => [...activeTools],
+		setActiveTools(names: string[]) {
+			activeTools = [...names];
 		},
 		events: {
 			on(channel: string, handler: (data: unknown) => void) {
@@ -37,7 +41,6 @@ test("registers compact_search and provides custom compaction after durable stor
 				return () => {};
 			},
 			emit(channel: string, data: unknown) {
-				emitted.push(channel);
 				for (const handler of busHandlers.get(channel) ?? []) handler(data);
 			},
 		},
@@ -46,10 +49,16 @@ test("registers compact_search and provides custom compaction after durable stor
 	try {
 		contextCompactExtension(pi);
 		assert.equal(tools[0]?.name, "compact_search");
-		assert.ok(emitted.includes(CAPABILITY_AVAILABLE));
+		assert.equal(tools[0]?.promptSnippet, undefined);
+		assert.equal(tools[0]?.promptGuidelines, undefined);
 
-		pi.events.emit(CAPABILITY_DISCOVER, {});
-		assert.equal(emitted.filter((channel) => channel === CAPABILITY_AVAILABLE).length, 2);
+		const started = handlers.get("session_start");
+		assert.ok(started);
+		await started(
+			{ type: "session_start", reason: "startup" },
+			{ sessionManager: { getBranch: () => [] } },
+		);
+		assert.deepEqual(activeTools, []);
 
 		const compact = handlers.get("session_before_compact");
 		assert.ok(compact);
@@ -74,7 +83,7 @@ test("registers compact_search and provides custom compaction after durable stor
 		} as unknown as SessionBeforeCompactEvent;
 		const ctx = {
 			cwd: "/project",
-			sessionManager: { getSessionFile: () => "/sessions/a.jsonl" },
+			sessionManager: { getSessionFile: () => "/sessions/a.jsonl", getBranch: () => [] },
 			hasUI: true,
 			ui: {
 				notify(message: string, level: string) {
@@ -112,6 +121,7 @@ test("registers compact_search and provides custom compaction after durable stor
 		assert.deepEqual(notifications, [
 			{ message: "Compacted 42k tokens · archived 2 messages", level: "info" },
 		]);
+		assert.deepEqual(activeTools, ["compact_search"]);
 
 		await compacted(
 			{
@@ -149,6 +159,8 @@ test("falls back to Pi compaction when durable storage fails", async () => {
 			handlers.set(name, handler);
 		},
 		registerTool() {},
+		getActiveTools: () => ["compact_search"],
+		setActiveTools() {},
 		events: { on: () => () => {}, emit() {} },
 	} as unknown as ExtensionAPI;
 	try {

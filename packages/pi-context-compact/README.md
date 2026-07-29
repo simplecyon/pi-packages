@@ -15,7 +15,9 @@ the `compact_search` tool instead of being replayed into every model request.
 - Includes only explicitly failed tool results in the unresolved-error section;
   words such as "error" in source code or documentation are not treated as
   runtime failures.
-- Registers `compact_search` for bounded keyword recovery from cold history.
+- Registers `compact_search` for bounded keyword recovery from cold history,
+  but keeps it model-invisible until this extension has actually compacted the
+  active branch. Resumed compacted branches reactivate it automatically.
 - Falls back to Pi's native compaction if durable storage fails.
 - Shows a compact TUI completion notice with the pre-compaction token count and
   archived message count.
@@ -62,9 +64,8 @@ injecting an entire archived tool result back into context.
 
 ## Compatibility
 
-The package does not require a context-mode extension. When a compatible
-context-mode package is present, an event-bus capability handshake asks it to
-skip its duplicate resume snapshot.
+The package is independently implemented and has no context-mode runtime,
+storage-format, or capability-handshake dependency.
 
 Targets Pi 0.82.x.
 

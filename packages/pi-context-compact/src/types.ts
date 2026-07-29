@@ -1,5 +1,3 @@
-export const CAPABILITY_AVAILABLE = "cyon:context-compact:available";
-export const CAPABILITY_DISCOVER = "cyon:context-compact:discover";
 export const CHECKPOINT_OWNER = "context-compact-cyon";
 export const CHECKPOINT_SCHEMA_VERSION = 1;
 export const MAX_CHECKPOINT_CHARS = 6000;

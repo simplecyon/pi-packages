@@ -11,12 +11,15 @@ const manifest = JSON.parse(
 const expectedPackages = new Map([
 	["pi-ask-user-question", "@simplecyon/pi-ask-user-question"],
 	["pi-context-compact", "@simplecyon/pi-context-compact"],
+	["pi-context-artifacts", "@simplecyon/pi-context-artifacts"],
+	["pi-context-core", "@simplecyon/pi-context-core"],
 	["pi-context-inspector", "@simplecyon/pi-context-inspector"],
 	["pi-memory", "@simplecyon/pi-memory"],
 	["pi-minimal-tui", "@simplecyon/pi-minimal-tui"],
 	["pi-safe-operation", "@simplecyon/pi-safe-operation"],
 	["pi-session-tasks", "@simplecyon/pi-session-tasks"],
 	["pi-skill-telemetry", "@simplecyon/pi-skill-telemetry"],
+	["pi-token-roi", "@simplecyon/pi-token-roi"],
 ]);
 
 test("aggregate manifest points to existing package resources", () => {
@@ -24,7 +27,7 @@ test("aggregate manifest points to existing package resources", () => {
 		...(manifest.pi?.extensions ?? []),
 		...(manifest.pi?.themes ?? []),
 	];
-	assert.equal(resources.length, 9);
+	assert.equal(resources.length, 11);
 	for (const resource of resources) {
 		assert.equal(
 			fs.existsSync(path.resolve(root, resource)),
@@ -63,6 +66,13 @@ test("every workspace is independently publishable under @simplecyon", () => {
 		assert.equal(packageManifest.files?.includes("LICENSE"), true);
 		assert.equal(fs.existsSync(path.join(packageRoot, "README.md")), true);
 		assert.equal(fs.existsSync(path.join(packageRoot, "LICENSE")), true);
+		if (packageManifest.dependencies?.["@simplecyon/pi-context-core"]) {
+			assert.equal(
+				packageManifest.bundledDependencies?.includes("@simplecyon/pi-context-core"),
+				true,
+				`${expectedName} must bundle pi-context-core for Pi package isolation`,
+			);
+		}
 
 		for (const resource of [
 			...(packageManifest.pi?.extensions ?? []),

@@ -1,5 +1,6 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { TOKEN_ROI_MILESTONE_EVENT } from "@simplecyon/pi-context-core";
 import { Type } from "typebox";
 import {
 	MAX_TASKS,
@@ -308,6 +309,12 @@ export default function sessionTasksExtension(pi: ExtensionAPI): void {
 					revision: details.revision,
 					tasks: cloneTasks(details.tasks),
 				};
+				if (details.changes.completed.length > 0) {
+					pi.events.emit(TOKEN_ROI_MILESTONE_EVENT, {
+						kind: "session_task_completed",
+						count: details.changes.completed.length,
+					});
+				}
 				renderTaskUI(ctx);
 
 				return {

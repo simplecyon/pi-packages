@@ -1,21 +1,22 @@
 {
-  "name": "@simplecyon/pi-session-tasks",
+  "name": "@simplecyon/pi-token-roi",
   "version": "0.1.0",
   "type": "module",
-  "description": "Session-scoped, branch-aware task tracking for Pi",
+  "description": "Observe-only token ROI telemetry and /roi reporting for Pi",
   "keywords": [
     "pi-package",
     "pi-extension",
-    "session",
-    "tasks"
+    "context",
+    "tokens",
+    "telemetry"
   ],
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/simplecyon/pi-packages.git",
-    "directory": "packages/pi-session-tasks"
+    "directory": "packages/pi-token-roi"
   },
-  "homepage": "https://github.com/simplecyon/pi-packages/tree/main/packages/pi-session-tasks#readme",
+  "homepage": "https://github.com/simplecyon/pi-packages/tree/main/packages/pi-token-roi#readme",
   "bugs": {
     "url": "https://github.com/simplecyon/pi-packages/issues"
   },
@@ -45,17 +46,11 @@
     "@simplecyon/pi-context-core"
   ],
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.82.1 <0.83.0",
-    "@earendil-works/pi-coding-agent": ">=0.82.1 <0.83.0",
-    "@earendil-works/pi-tui": ">=0.82.1 <0.83.0",
-    "typebox": ">=1.1.38 <2.0.0"
+    "@earendil-works/pi-coding-agent": ">=0.82.1 <0.83.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.82.1",
     "@earendil-works/pi-coding-agent": "0.82.1",
-    "@earendil-works/pi-tui": "0.82.1",
     "@types/node": "^24.0.0",
-    "typebox": "1.1.38",
     "typescript": "^5.9.3"
   },
   "engines": {

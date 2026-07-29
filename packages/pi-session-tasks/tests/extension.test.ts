@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
+import { TOKEN_ROI_MILESTONE_EVENT } from "@simplecyon/pi-context-core";
 
 const globalRoot = execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim();
 const loaderUrl = pathToFileURL(
@@ -131,6 +132,44 @@ test("read/update workflow exposes revisions and rejects stale replacements", as
 	const current = await read.execute("read-1", {}, undefined, undefined, context);
 	assert.equal(current.details.revision, 1);
 	assert.deepEqual(current.details.tasks, tasks);
+});
+
+test("emits aggregate milestones when tasks transition to completed", async () => {
+	const extension = await loadSessionTasks();
+	const update = toolDefinition(extension, "update_tasks");
+	const milestones: unknown[] = [];
+	eventBuses.get(extension)!.on(TOKEN_ROI_MILESTONE_EVENT, (data: unknown) => {
+		milestones.push(data);
+	});
+
+	await update.execute(
+		"update-milestone-1",
+		{
+			expected_revision: 0,
+			tasks: [
+				{ id: "implement", title: "Implement the change", status: "in_progress" },
+				{ id: "verify", title: "Verify the change", status: "pending" },
+			],
+		},
+		undefined,
+		undefined,
+		context,
+	);
+	await update.execute(
+		"update-milestone-2",
+		{
+			expected_revision: 1,
+			tasks: [
+				{ id: "implement", title: "Implement the change", status: "completed" },
+				{ id: "verify", title: "Verify the change", status: "in_progress" },
+			],
+		},
+		undefined,
+		undefined,
+		context,
+	);
+
+	assert.deepEqual(milestones, [{ kind: "session_task_completed", count: 1 }]);
 });
 
 test("task tools use compact collapsed rows and reveal results only when expanded", async () => {

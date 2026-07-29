@@ -12,12 +12,17 @@ Cyon's package-only extensions and themes for
 | [`packages/pi-memory`](packages/pi-memory) | `@simplecyon/pi-memory` | Cache-stable memory injection with scope-aware progressive disclosure |
 | [`packages/pi-safe-operation`](packages/pi-safe-operation) | `@simplecyon/pi-safe-operation` | Destructive-operation safety, recoverable deletion, and secret-egress redaction |
 | [`packages/pi-context-compact`](packages/pi-context-compact) | `@simplecyon/pi-context-compact` | Durable compaction checkpoints and cold-history search |
+| [`packages/pi-context-artifacts`](packages/pi-context-artifacts) | `@simplecyon/pi-context-artifacts` | Safety-gated bounded output with durable exact recovery |
 | [`packages/pi-context-inspector`](packages/pi-context-inspector) | `@simplecyon/pi-context-inspector` | `/context` diagnostics for prompt and conversation usage |
+| [`packages/pi-context-core`](packages/pi-context-core) | `@simplecyon/pi-context-core` | Model-invisible token accounting and context primitives |
+| [`packages/pi-token-roi`](packages/pi-token-roi) | `@simplecyon/pi-token-roi` | Observe-only `/roi` economics and JSON export |
 | [`packages/pi-session-tasks`](packages/pi-session-tasks) | `@simplecyon/pi-session-tasks` | Session-local, branch-aware structured task tracking |
 | [`packages/pi-skill-telemetry`](packages/pi-skill-telemetry) | `@simplecyon/pi-skill-telemetry` | Privacy-preserving local skill usage telemetry |
 
-`context-mode-cyon` remains outside this repository because it is an upstream
-fork with its own history, build system, and release cadence.
+The former project-level `context-mode-cyon` package has been replaced by
+independently implemented capabilities in this suite. This repository does not
+import it, require it, or assume its storage format; see
+[Token ROI architecture](docs/token-roi.md).
 
 ## Install separately
 
@@ -29,7 +34,9 @@ pi install npm:@simplecyon/pi-minimal-tui
 pi install npm:@simplecyon/pi-memory
 pi install npm:@simplecyon/pi-safe-operation
 pi install npm:@simplecyon/pi-context-compact
+pi install npm:@simplecyon/pi-context-artifacts
 pi install npm:@simplecyon/pi-context-inspector
+pi install npm:@simplecyon/pi-token-roi
 pi install npm:@simplecyon/pi-session-tasks
 pi install npm:@simplecyon/pi-skill-telemetry
 ```
@@ -56,13 +63,15 @@ For local development:
 pi install -l --approve /absolute/path/to/pi-packages
 ```
 
-The repository root is an aggregate Git package. Its manifest exposes all eight
-extensions and the bundled theme. The npm packages are separate distribution
-units with independent manifests, versions, tests, and compatibility boundaries.
+The repository root is an aggregate Git package. Its manifest exposes all ten
+extensions and the bundled theme. `pi-context-core` is a library dependency and
+does not load as an extension. The npm packages are separate distribution units
+with independent manifests, versions, tests, and compatibility boundaries.
 
 After installation, restart Pi. Use `/theme` to select
-`cyon-minimal-dark`; package commands such as `/memory`, `/context`, `/tasks`,
-and `/skill-stats` become available automatically.
+`cyon-minimal-dark`; package commands such as `/memory`, `/context`,
+`/artifacts`, `/roi`, `/tasks`, and `/skill-stats` become available
+automatically.
 
 ## Requirements
 
@@ -106,8 +115,8 @@ dry runs, and npm Trusted Publishing.
 - Cross-package loading behavior belongs in `tests/`.
 - Package-specific behavior and commands are documented in that package's
   README.
-- The repository does not contain `context-mode-cyon` or Vault-specific guard
-  extensions.
+- The repository does not contain or depend on `context-mode-cyon`.
+- Vault-specific guard extensions remain outside this repository.
 
 ## License
 

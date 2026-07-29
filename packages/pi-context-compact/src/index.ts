@@ -12,8 +12,6 @@ import { serializeMessages } from "./messages.ts";
 import { searchHistory } from "./search.ts";
 import { appendCheckpoint, appendSegment } from "./storage.ts";
 import {
-	CAPABILITY_AVAILABLE,
-	CAPABILITY_DISCOVER,
 	CHECKPOINT_OWNER,
 	CHECKPOINT_SCHEMA_VERSION,
 	type ContextCompactDetails,
@@ -41,28 +39,36 @@ function formatTokenCount(value: number): string {
 
 export default function contextCompactExtension(pi: ExtensionAPI): void {
 	let ephemeralSessionId = randomUUID();
-	pi.on("session_start", () => {
-		ephemeralSessionId = randomUUID();
-	});
-	const announce = () => {
-		pi.events.emit(CAPABILITY_AVAILABLE, {
-			owner: CHECKPOINT_OWNER,
-			protocolVersion: 1,
-			searchTool: "compact_search",
-		});
-	};
-	pi.events.on(CAPABILITY_DISCOVER, announce);
-	announce();
 
+	function hasOwnedCompaction(ctx: ExtensionContext): boolean {
+		return ctx.sessionManager.getBranch().some((entry) => {
+			if (entry.type !== "compaction") return false;
+			const details = entry.details as Partial<ContextCompactDetails> | undefined;
+			return details?.owner === CHECKPOINT_OWNER;
+		});
+	}
+
+	function setSearchActive(active: boolean): void {
+		const current = pi.getActiveTools();
+		const next = active
+			? [...new Set([...current, "compact_search"])]
+			: current.filter((name) => name !== "compact_search");
+		if (next.length !== current.length || next.some((name, index) => name !== current[index])) {
+			pi.setActiveTools(next);
+		}
+	}
+
+	pi.on("session_start", (_event, ctx) => {
+		ephemeralSessionId = randomUUID();
+		setSearchActive(hasOwnedCompaction(ctx));
+	});
+	pi.on("session_tree", (_event, ctx) => {
+		setSearchActive(hasOwnedCompaction(ctx));
+	});
 	pi.registerTool({
 		name: "compact_search",
 		label: "Compact History Search",
 		description: "Search older messages that context compaction moved out of the active Pi context.",
-		promptSnippet: "Search discarded history from earlier context compactions",
-		promptGuidelines: [
-			"Use compact_search when a continuation checkpoint says older details exist or when exact prior errors, decisions, tool output, or user wording are needed.",
-			"Search compact_search before asking the user to repeat information lost during compaction.",
-		],
 		parameters: Type.Object({
 			query: Type.String({ minLength: 1, description: "Words or exact phrase to find in compacted history" }),
 			limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, default: 5 })),
@@ -163,9 +169,10 @@ export default function contextCompactExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_compact", (event: SessionCompactEvent, ctx) => {
 		try {
-			if (!event.fromExtension || !ctx.hasUI) return;
 			const details = event.compactionEntry.details as Partial<ContextCompactDetails> | undefined;
 			if (details?.owner !== CHECKPOINT_OWNER) return;
+			setSearchActive(true);
+			if (!event.fromExtension || !ctx.hasUI) return;
 			const messageCount = Number(details.messageCount ?? 0);
 			const label = messageCount === 1 ? "message" : "messages";
 			ctx.ui.notify(

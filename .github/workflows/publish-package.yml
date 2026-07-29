@@ -8,10 +8,15 @@ on:
         required: true
         type: choice
         options:
+          - pi-ask-user-question
           - pi-minimal-tui
           - pi-memory
+          - pi-safe-operation
           - pi-context-compact
+          - pi-context-artifacts
+          - pi-context-core
           - pi-context-inspector
+          - pi-token-roi
           - pi-session-tasks
           - pi-skill-telemetry
       tag:

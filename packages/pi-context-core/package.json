@@ -1,0 +1,47 @@
+{
+  "name": "@simplecyon/pi-context-core",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Shared token accounting and context primitives for Pi extensions",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "context",
+    "tokens",
+    "telemetry"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/simplecyon/pi-packages.git",
+    "directory": "packages/pi-context-core"
+  },
+  "homepage": "https://github.com/simplecyon/pi-packages/tree/main/packages/pi-context-core#readme",
+  "bugs": {
+    "url": "https://github.com/simplecyon/pi-packages/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
