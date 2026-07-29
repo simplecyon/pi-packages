@@ -14,7 +14,8 @@ Compact, low-noise rendering for Pi's built-in tool events, plus the
   status.
 - Collapsed edits show a high-contrast compact diff with one context line, a
   single omission marker between distant change groups, and subtle
-  theme-adaptive green/red backgrounds on added and removed rows.
+  theme-adaptive green/red backgrounds on added and removed rows. Dark themes
+  use low-luminance tints; light themes use pale high-luminance tints.
 - `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls` use
   background-free self-rendered shells.
 - `Ctrl+O` continues to use Pi's native expanded state and restores full native

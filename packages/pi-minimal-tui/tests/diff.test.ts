@@ -29,8 +29,8 @@ test("compact diff keeps one context line and collapses the middle", () => {
 	]);
 });
 
-test("compact diff assigns distinct semantic colors", () => {
-	const theme = {
+function semanticTheme(variant: "dark" | "light"): Theme {
+	return {
 		fg(color: string, text: string) {
 			return `<${color}>${text}</${color}>`;
 		},
@@ -38,30 +38,55 @@ test("compact diff assigns distinct semantic colors", () => {
 			return `<bg:${color}>${text}</bg:${color}>`;
 		},
 		getFgAnsi(color: string) {
+			if (variant === "light") {
+				return color === "toolDiffAdded" ? "\x1b[38;2;88;132;88m" : "\x1b[38;2;170;85;85m";
+			}
 			return color === "toolDiffAdded" ? "\x1b[38;2;126;231;135m" : "\x1b[38;2;255;123;114m";
 		},
 		getBgAnsi() {
-			return "\x1b[48;2;58;58;74m";
+			return variant === "light" ? "\x1b[48;2;208;208;224m" : "\x1b[48;2;58;58;74m";
 		},
 		getColorMode() {
 			return "truecolor";
 		},
 	} as unknown as Theme;
-	const rendered = new CompactDiffComponent(distantChanges, theme).render();
+}
+
+test("compact diff uses low-luminance semantic backgrounds in dark themes", () => {
+	const rendered = new CompactDiffComponent(distantChanges, semanticTheme("dark")).render();
 
 	assert.ok(
 		rendered.some(
 			(line) =>
 				line ===
-				"\x1b[48;2;113;76;85m<toolDiffRemoved>-2 const oldA = true;</toolDiffRemoved>\x1b[49m",
+				"\x1b[48;2;74;45;48m<toolDiffRemoved>-2 const oldA = true;</toolDiffRemoved>\x1b[49m",
 		),
 	);
 	assert.ok(
 		rendered.some(
 			(line) =>
 				line ===
-				"\x1b[48;2;77;106;91m<toolDiffAdded>+2 const newA = true;</toolDiffAdded>\x1b[49m",
+				"\x1b[48;2;46;69;53m<toolDiffAdded>+2 const newA = true;</toolDiffAdded>\x1b[49m",
 		),
 	);
 	assert.ok(rendered.includes("<dim>  …</dim>"));
+});
+
+test("compact diff uses high-luminance semantic backgrounds in light themes", () => {
+	const rendered = new CompactDiffComponent(distantChanges, semanticTheme("light")).render();
+
+	assert.ok(
+		rendered.some(
+			(line) =>
+				line ===
+				"\x1b[48;2;232;222;227m<toolDiffRemoved>-2 const oldA = true;</toolDiffRemoved>\x1b[49m",
+		),
+	);
+	assert.ok(
+		rendered.some(
+			(line) =>
+				line ===
+				"\x1b[48;2;223;228;227m<toolDiffAdded>+2 const newA = true;</toolDiffAdded>\x1b[49m",
+		),
+	);
 });

@@ -71,7 +71,7 @@ function rgbFromAnsi(ansi: string): Rgb | undefined {
 	return indexed ? ansi256ToRgb(Number(indexed[1])) : undefined;
 }
 
-function mix(base: Rgb, tint: Rgb, tintRatio = 0.28): Rgb {
+function mix(base: Rgb, tint: Rgb, tintRatio: number): Rgb {
 	const channel = (baseValue: number, tintValue: number) =>
 		Math.round(baseValue * (1 - tintRatio) + tintValue * tintRatio);
 	return {
@@ -79,6 +79,10 @@ function mix(base: Rgb, tint: Rgb, tintRatio = 0.28): Rgb {
 		g: channel(base.g, tint.g),
 		b: channel(base.b, tint.b),
 	};
+}
+
+function isLightBackground({ r, g, b }: Rgb): boolean {
+	return r * 0.299 + g * 0.587 + b * 0.114 >= 160;
 }
 
 function semanticBackground(
@@ -97,7 +101,10 @@ function semanticBackground(
 	const tint = rgbFromAnsi(theme.getFgAnsi(color));
 	if (!base || !tint) return theme.bg("selectedBg", text);
 
-	const background = mix(base, tint);
+	const light = isLightBackground(base);
+	const neutral = light ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 };
+	const surface = mix(base, neutral, light ? 0.7 : 0.6);
+	const background = mix(surface, tint, light ? 0.12 : 0.22);
 	const ansi =
 		theme.getColorMode() === "truecolor"
 			? `\x1b[48;2;${background.r};${background.g};${background.b}m`
