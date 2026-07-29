@@ -1,45 +1,91 @@
 # pi-packages
 
-Cyon's monorepo for package-only Pi extensions and themes.
+Cyon's package-only extensions and themes for
+[Pi](https://github.com/earendil-works/pi), maintained as one monorepo.
 
 ## Packages
 
 | Workspace | Package | Purpose |
 | --- | --- | --- |
-| `packages/pi-minimal-tui` | `pi-minimal-tui` | Minimal tool-event rendering and the `cyon-minimal-dark` theme |
-| `packages/pi-memory` | `@cyon/pi-memory` | Cache-stable base memory and scope-aware progressive disclosure |
-| `packages/pi-context-compact` | `@cyon/pi-context-compact` | Durable compaction checkpoints and cold-history search |
-| `packages/pi-context-inspector` | `@cyon/pi-context-inspector` | `/context` context-usage inspection |
-| `packages/pi-session-tasks` | `@cyon/pi-session-tasks` | Session-local structured task tracking |
-| `packages/pi-skill-telemetry` | `@cyon/pi-skill-telemetry` | Privacy-preserving local skill telemetry |
+| [`packages/pi-minimal-tui`](packages/pi-minimal-tui) | `pi-minimal-tui` | Compact tool-event rendering and the `cyon-minimal-dark` theme |
+| [`packages/pi-memory`](packages/pi-memory) | `@cyon/pi-memory` | Cache-stable memory injection with scope-aware progressive disclosure |
+| [`packages/pi-context-compact`](packages/pi-context-compact) | `@cyon/pi-context-compact` | Durable compaction checkpoints and cold-history search |
+| [`packages/pi-context-inspector`](packages/pi-context-inspector) | `@cyon/pi-context-inspector` | `/context` diagnostics for prompt and conversation usage |
+| [`packages/pi-session-tasks`](packages/pi-session-tasks) | `@cyon/pi-session-tasks` | Session-local, branch-aware structured task tracking |
+| [`packages/pi-skill-telemetry`](packages/pi-skill-telemetry) | `@cyon/pi-skill-telemetry` | Privacy-preserving local skill usage telemetry |
 
 `context-mode-cyon` remains outside this repository because it is an upstream
 fork with its own history, build system, and release cadence.
 
-## Install the suite
+## Install
+
+Install the complete suite from GitHub:
 
 ```bash
 pi install git:github.com/simplecyon/pi-packages
 ```
 
-During local development:
+Install it for one trusted project:
 
 ```bash
-pi install -l --approve /path/to/pi-packages
+pi install git:github.com/simplecyon/pi-packages -l --approve
 ```
 
-The repository root is an aggregate Pi Package. Individual workspace packages
-retain their own manifests and versions so they can also be tested or
-published independently.
+For local development:
+
+```bash
+pi install -l --approve /absolute/path/to/pi-packages
+```
+
+The repository root is the aggregate Pi package. Its manifest exposes all six
+extensions and the bundled theme, while every workspace retains an independent
+manifest, version, tests, and compatibility boundary.
+
+After installation, restart Pi. Use `/theme` to select
+`cyon-minimal-dark`; package commands such as `/memory`, `/context`, `/tasks`,
+and `/skill-stats` become available automatically.
+
+## Requirements
+
+- Node.js 22.19 or newer
+- Pi `@earendil-works/pi-*` 0.82.x
+- A trusted project when loading project-local extensions
 
 ## Development
+
+This repository uses pnpm workspaces:
 
 ```bash
 pnpm install --ignore-scripts
 pnpm run check
 ```
 
-Pi core packages are peer dependencies of the individual packages and pinned
-development dependencies of the workspace. The workspace uses pnpm so its
-root override can replace vulnerable transitive dependencies even when an
-upstream development package publishes an npm shrinkwrap.
+Run one package only:
+
+```bash
+pnpm --filter @cyon/pi-memory check
+pnpm --filter pi-minimal-tui check
+```
+
+`pnpm run check` runs every workspace's typecheck and tests, then verifies that
+Pi's real resource loader can load the aggregate package without duplicate or
+invalid resources.
+
+Pi core packages are peer dependencies of individual packages and pinned
+development dependencies of the workspace. The root pnpm override keeps
+vulnerable transitive development dependencies out of the lockfile even when
+an upstream package publishes an npm shrinkwrap. Pi's Git installer uses
+production-only dependencies when consuming this repository.
+
+## Repository policy
+
+- Package code belongs under `packages/<name>/`.
+- Cross-package loading behavior belongs in `tests/`.
+- Package-specific behavior and commands are documented in that package's
+  README.
+- The repository does not contain `context-mode-cyon` or Vault-specific guard
+  extensions.
+
+## License
+
+MIT

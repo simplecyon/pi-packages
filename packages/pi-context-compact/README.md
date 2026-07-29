@@ -1,33 +1,71 @@
 # @cyon/pi-context-compact
 
-Standalone, package-only context compaction for Pi.
+Package-only durable context compaction for Pi.
 
-It stores messages leaving the active context in an append-only local history,
-replaces Pi's generated summary with a bounded continuation checkpoint, and
-registers `compact_search` for on-demand recovery. Successful TUI compactions
-show a compact completion notice with the pre-compact token count and archived
-message count.
+When Pi compacts a session, this extension stores the messages leaving active
+context in append-only local history and replaces the generated summary with a
+bounded continuation checkpoint. Older material remains recoverable through
+the `compact_search` tool instead of being replayed into every model request.
 
-Only tool results explicitly marked as runtime errors are promoted into the
-checkpoint's unresolved-error section. Error-related words in documentation or
-source code do not create false blockers.
+## Behavior
+
+- Writes archived session messages to append-only local storage.
+- Produces a bounded checkpoint containing continuation state and retrieval
+  pointers.
+- Includes only explicitly failed tool results in the unresolved-error section;
+  words such as "error" in source code or documentation are not treated as
+  runtime failures.
+- Registers `compact_search` for bounded keyword recovery from cold history.
+- Falls back to Pi's native compaction if durable storage fails.
+- Shows a compact TUI completion notice with the pre-compaction token count and
+  archived message count.
 
 ## Install
 
+This package is distributed through the aggregate repository:
+
 ```bash
-pi install /path/to/Side-Project/pi/context-compact
+pi install git:github.com/simplecyon/pi-packages
 ```
 
-The default history root is:
+For local development, load the aggregate package:
+
+```bash
+pi install -l --approve /absolute/path/to/pi-packages
+```
+
+## Storage
+
+The default history directory is:
 
 ```text
 ~/.pi/agent/context-compact/
 ```
 
-Set `PI_CONTEXT_COMPACT_DIR` to override it, including in tests.
+Override it for testing or isolated environments:
+
+```bash
+PI_CONTEXT_COMPACT_DIR=/absolute/path pi
+```
+
+History is local and append-only. Search returns bounded snippets rather than
+injecting an entire archived tool result back into context.
 
 ## Compatibility
 
-The package does not require context-mode. When a compatible context-mode
-extension is also loaded, an event-bus capability handshake tells context-mode
-to skip its duplicate resume snapshot.
+The package does not require a context-mode extension. When a compatible
+context-mode package is present, an event-bus capability handshake asks it to
+skip its duplicate resume snapshot.
+
+Targets Pi 0.82.x.
+
+## Development
+
+From the monorepo root:
+
+```bash
+pnpm --filter @cyon/pi-context-compact check
+```
+
+See the [repository README](../../README.md) for suite installation and
+workspace conventions.

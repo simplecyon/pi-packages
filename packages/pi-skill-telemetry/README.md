@@ -1,42 +1,80 @@
 # @cyon/pi-skill-telemetry
 
-Privacy-preserving skill usage telemetry for Pi. The extension records explicit
-`/skill:name` expansion and model-driven `read` calls for registered `SKILL.md`
-files. It never stores prompts, skill content, tool output, shell commands, or
-absolute paths.
+Privacy-preserving local skill usage telemetry for Pi.
 
-Each confirmed invocation also appends a compact, durable TUI event:
-`✦ 使用了 <skill-name> 技能`. The event is visible in the conversation stream
-and persists with the session, but is excluded from LLM context.
+The extension records explicit `/skill:name` expansion and model-driven reads
+of registered `SKILL.md` files. It never stores prompts, skill contents, tool
+outputs, shell commands, or absolute paths.
 
-Events are written to:
+## Behavior
+
+- Confirms explicit and model-driven skill invocations.
+- Appends a compact durable conversation event:
+  `✦ 使用了 <skill-name> 技能`.
+- Keeps that event visible in the session while excluding it from model
+  context.
+- Gives each Pi process an independent open spool.
+- Seals completed spools into immutable, checksummed JSONL segments after a
+  skill-bearing run settles.
+- Keeps a stable local installation identity for later private aggregation.
+
+## Storage
+
+The default local directory is:
 
 ```text
 ~/.pi/agent/skill-telemetry/
 ```
 
-Each Pi process owns a separate open spool. After a skill-bearing agent run
-settles, the spool is sealed into an immutable, checksummed JSONL segment.
-`agent-sync telemetry publish` copies sealed segments into the private Hub under
-the current device namespace, where any device can aggregate them.
+Override it for testing or isolated environments:
 
-For the Cyon vault, the synchronized project-level deployment is:
-
-```text
-<vault>/.pi/extensions/skill-telemetry/
+```bash
+PI_SKILL_TELEMETRY_DIR=/absolute/path pi
 ```
 
-The local/private package remains the development and packaging source.
+Sealed segments can be published by a separate private synchronization
+workflow. This package does not send telemetry over the network itself.
 
-## Commands
+## Install
 
-- `/skill-stats` shows a compact local-device summary inside Pi.
-- `PI_SKILL_TELEMETRY_DIR=/path` overrides storage for testing.
+Install the aggregate package:
+
+```bash
+pi install git:github.com/simplecyon/pi-packages
+```
+
+For local development:
+
+```bash
+pi install -l --approve /absolute/path/to/pi-packages
+```
+
+## Command
+
+```text
+/skill-stats
+```
+
+The command displays a compact summary for the current device.
+
+## Privacy boundary
+
+Stored records identify the skill and local invocation metadata needed for
+aggregation. They exclude user content, model content, file contents, commands,
+tool results, and direct absolute paths.
+
+## Compatibility
+
+Targets Pi 0.82.x. Local segment creation works without `agent-sync`; publishing
+or cross-device aggregation is intentionally outside this package.
 
 ## Development
 
+From the monorepo root:
+
 ```bash
-npm install
-npm run check
-npm pack --dry-run
+pnpm --filter @cyon/pi-skill-telemetry check
 ```
+
+See the [repository README](../../README.md) for suite installation and
+workspace conventions.
