@@ -70,3 +70,62 @@ test("session replay does not merge actions across user turns", () => {
 	assert.equal(grouping.getView("call-1")?.summary, undefined);
 	assert.equal(grouping.getView("call-2")?.summary, undefined);
 });
+
+test("thinking splits live action groups", () => {
+	const grouping = new ActionGroupCoordinator();
+	grouping.recordTool("call-1", "bash");
+	grouping.recordMessage({
+		role: "assistant",
+		content: [{ type: "thinking", thinking: "Inspect the result before continuing." }],
+	});
+	grouping.recordTool("call-2", "read");
+
+	assert.deepEqual(grouping.getView("call-1"), { hidden: false, summary: undefined });
+	assert.deepEqual(grouping.getView("call-2"), { hidden: false, summary: undefined });
+});
+
+test("session replay does not merge actions across thinking", () => {
+	const grouping = new ActionGroupCoordinator();
+	grouping.rebuild([
+		{
+			message: {
+				role: "assistant",
+				content: [
+					{ type: "thinking", thinking: "First batch." },
+					{ type: "toolCall", id: "call-1", name: "bash", arguments: {} },
+				],
+			},
+		},
+		{ message: { role: "toolResult", toolCallId: "call-1", toolName: "bash", content: [] } },
+		{
+			message: {
+				role: "assistant",
+				content: [
+					{ type: "thinking", thinking: "Reassess before the next action." },
+					{ type: "toolCall", id: "call-2", name: "read", arguments: {} },
+				],
+			},
+		},
+	]);
+
+	assert.deepEqual(grouping.getView("call-1"), { hidden: false, summary: undefined });
+	assert.deepEqual(grouping.getView("call-2"), { hidden: false, summary: undefined });
+});
+
+test("tool calls after one thinking block remain in the same batch", () => {
+	const grouping = new ActionGroupCoordinator();
+	grouping.recordMessage({
+		role: "assistant",
+		content: [
+			{ type: "thinking", thinking: "Run the independent checks together." },
+			{ type: "toolCall", id: "call-1", name: "bash", arguments: {} },
+			{ type: "toolCall", id: "call-2", name: "read", arguments: {} },
+		],
+	});
+
+	assert.deepEqual(grouping.getView("call-1"), { hidden: true, summary: undefined });
+	assert.deepEqual(grouping.getView("call-2"), {
+		hidden: false,
+		summary: { verb: "Ran 1 shell command, read 1 file", bullet: false },
+	});
+});

@@ -7,8 +7,10 @@ Compact, low-noise rendering for Pi's built-in tool events, plus the
 
 - Collapsed tool calls render as one descriptive line, such as
   `·read docs: extensions.md`.
-- Consecutive `bash`, `read`, `grep`, `find`, and `ls` actions collapse into a
-  count summary.
+- Consecutive `bash`, `read`, `grep`, `find`, and `ls` actions within one
+  execution batch collapse into a count summary. A new Thinking segment,
+  visible assistant content, user turn, error, or non-groupable tool starts a
+  new batch.
 - A single action keeps its descriptive verb-and-target row.
 - Bash failures stay compact while retaining outcomes such as timeout or exit
   status.

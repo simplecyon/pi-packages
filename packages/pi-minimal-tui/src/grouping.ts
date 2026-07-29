@@ -131,7 +131,9 @@ export class ActionGroupCoordinator {
 
 		for (const block of messageContent(message)) {
 			const type = stringField(block, "type");
-			if (type === "toolCall") {
+			if (type === "thinking") {
+				this.addBoundary();
+			} else if (type === "toolCall") {
 				const id = stringField(block, "id", "toolCallId");
 				const name = stringField(block, "name", "toolName");
 				if (id && name) this.recordTool(id, name);
