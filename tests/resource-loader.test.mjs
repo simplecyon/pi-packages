@@ -11,6 +11,7 @@ import {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workspaces = [
+	["pi-ask-user-question", 0],
 	["pi-context-compact", 0],
 	["pi-context-inspector", 0],
 	["pi-memory", 0],
@@ -48,10 +49,10 @@ test("Pi loads the aggregate package without duplicate or invalid resources", as
 	const themeResult = loader.getThemes();
 	assert.deepEqual(extensionResult.errors, []);
 	assert.deepEqual(themeResult.diagnostics, []);
-	assert.equal(extensionResult.extensions.length, 6);
+	assert.equal(extensionResult.extensions.length, 7);
 	assert.equal(
 		new Set(extensionResult.extensions.map((extension) => extension.path)).size,
-		6,
+		7,
 	);
 	assert.deepEqual(
 		themeResult.themes.map((theme) => theme.name),

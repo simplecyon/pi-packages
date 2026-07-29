@@ -31,6 +31,24 @@ const TOOL_NAME = "update_tasks";
 const READ_TOOL_NAME = "get_tasks";
 const WIDGET_KEY = "session-tasks";
 const UI_ENTRY_TYPE = "session-tasks-ui";
+const EXCLUSIVE_UI_CHANNEL = "simplecyon:ui-exclusive";
+
+interface ExclusiveUIEvent {
+	action: "acquire" | "release";
+	token: string;
+	source: string;
+}
+
+function isExclusiveUIEvent(value: unknown): value is ExclusiveUIEvent {
+	if (!value || typeof value !== "object") return false;
+	const event = value as Partial<ExclusiveUIEvent>;
+	return (
+		(event.action === "acquire" || event.action === "release") &&
+		typeof event.token === "string" &&
+		event.token.length > 0 &&
+		typeof event.source === "string"
+	);
+}
 
 interface DismissEntryData {
 	action: "dismiss-completed-summary";
@@ -111,6 +129,8 @@ export default function sessionTasksExtension(pi: ExtensionAPI): void {
 	let dismissedRevision: number | undefined;
 	let sessionPhase: SessionPhase = "settled";
 	let updateQueue: Promise<void> = Promise.resolve();
+	const exclusiveUITokens = new Set<string>();
+	let latestUIContext: ExtensionContext | undefined;
 
 	function currentUIState() {
 		return deriveTaskUIState(currentSnapshot, sessionPhase, dismissedRevision);
@@ -124,13 +144,14 @@ export default function sessionTasksExtension(pi: ExtensionAPI): void {
 
 	function renderTaskUI(ctx: ExtensionContext): void {
 		if (!ctx.hasUI) return;
+		latestUIContext = ctx;
 		// The task list belongs in the widget / explicit /tasks view, not in
 		// Pi's bottom status line. Clear any footer status left by an older
 		// extension version whenever UI state is refreshed.
 		ctx.ui.setStatus(WIDGET_KEY, undefined);
 		const state = currentUIState();
 		const tasks = currentSnapshot?.tasks ?? [];
-		if (state === "hidden") {
+		if (state === "hidden" || exclusiveUITokens.size > 0) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
 			return;
 		}
@@ -140,6 +161,13 @@ export default function sessionTasksExtension(pi: ExtensionAPI): void {
 			(_tui, theme) => new TaskWidgetComponent(tasks, state, theme),
 		);
 	}
+
+	pi.events.on(EXCLUSIVE_UI_CHANNEL, (data) => {
+		if (!isExclusiveUIEvent(data)) return;
+		if (data.action === "acquire") exclusiveUITokens.add(data.token);
+		else exclusiveUITokens.delete(data.token);
+		if (latestUIContext) renderTaskUI(latestUIContext);
+	});
 
 	function reconstructState(ctx: ExtensionContext): void {
 		currentSnapshot = undefined;
@@ -324,6 +352,7 @@ export default function sessionTasksExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
+		exclusiveUITokens.clear();
 		sessionPhase = "settled";
 		reconstructState(ctx);
 		renderTaskUI(ctx);

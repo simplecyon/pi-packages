@@ -16,7 +16,12 @@ const loaderUrl = pathToFileURL(
 		"loader.js",
 	),
 ).href;
+const eventBusUrl = pathToFileURL(
+	join(globalRoot, "@earendil-works", "pi-coding-agent", "dist", "core", "event-bus.js"),
+).href;
 const { loadExtensions } = await import(loaderUrl);
+const { createEventBus } = await import(eventBusUrl);
+const eventBuses = new WeakMap<object, ReturnType<typeof createEventBus>>();
 
 const extensionPath = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 const theme = {
@@ -39,9 +44,11 @@ const context = {
 };
 
 async function loadSessionTasks() {
-	const loaded = await loadExtensions([extensionPath], process.cwd());
+	const eventBus = createEventBus();
+	const loaded = await loadExtensions([extensionPath], process.cwd(), eventBus);
 	assert.deepEqual(loaded.errors, []);
 	assert.equal(loaded.extensions.length, 1);
+	eventBuses.set(loaded.extensions[0], eventBus);
 	return loaded.extensions[0];
 }
 
@@ -204,6 +211,98 @@ test("task UI never publishes progress to the bottom status line", async () => {
 	assert.ok(widgetValues.some((value) => typeof value === "function"));
 	assert.ok(statusValues.length > 0);
 	assert.ok(statusValues.every((value) => value === undefined));
+});
+
+test("exclusive UI events temporarily hide and restore the task widget", async () => {
+	const extension = await loadSessionTasks();
+	const update = toolDefinition(extension, "update_tasks");
+	const widgetValues: unknown[] = [];
+	const tuiContext = {
+		...context,
+		hasUI: true,
+		mode: "tui",
+		ui: {
+			...context.ui,
+			setWidget(_key: string, value: unknown) {
+				widgetValues.push(value);
+			},
+		},
+	};
+
+	await update.execute(
+		"update-exclusive",
+		{
+			expected_revision: 0,
+			tasks: [{ id: "ask", title: "Answer blocking question", status: "in_progress" }],
+		},
+		undefined,
+		undefined,
+		tuiContext,
+	);
+	assert.equal(typeof widgetValues.at(-1), "function");
+
+	eventBuses.get(extension)!.emit("simplecyon:ui-exclusive", {
+		action: "acquire",
+		token: "ask-1",
+		source: "AskUserQuestion",
+	});
+	assert.equal(widgetValues.at(-1), undefined);
+
+	eventBuses.get(extension)!.emit("simplecyon:ui-exclusive", {
+		action: "release",
+		token: "ask-1",
+		source: "AskUserQuestion",
+	});
+	assert.equal(typeof widgetValues.at(-1), "function");
+});
+
+test("nested exclusive UI tokens restore only after the final release", async () => {
+	const extension = await loadSessionTasks();
+	const update = toolDefinition(extension, "update_tasks");
+	const widgetValues: unknown[] = [];
+	const tuiContext = {
+		...context,
+		hasUI: true,
+		mode: "tui",
+		ui: {
+			...context.ui,
+			setWidget(_key: string, value: unknown) {
+				widgetValues.push(value);
+			},
+		},
+	};
+	await update.execute(
+		"update-nested",
+		{
+			expected_revision: 0,
+			tasks: [{ id: "nested", title: "Handle nested dialogs", status: "in_progress" }],
+		},
+		undefined,
+		undefined,
+		tuiContext,
+	);
+	eventBuses.get(extension)!.emit("simplecyon:ui-exclusive", {
+		action: "acquire",
+		token: "a",
+		source: "test",
+	});
+	eventBuses.get(extension)!.emit("simplecyon:ui-exclusive", {
+		action: "acquire",
+		token: "b",
+		source: "test",
+	});
+	eventBuses.get(extension)!.emit("simplecyon:ui-exclusive", {
+		action: "release",
+		token: "a",
+		source: "test",
+	});
+	assert.equal(widgetValues.at(-1), undefined);
+	eventBuses.get(extension)!.emit("simplecyon:ui-exclusive", {
+		action: "release",
+		token: "b",
+		source: "test",
+	});
+	assert.equal(typeof widgetValues.at(-1), "function");
 });
 
 test("parallel replacements from the same revision cannot overwrite each other", async () => {

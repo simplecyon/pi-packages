@@ -9,6 +9,7 @@ const manifest = JSON.parse(
 	fs.readFileSync(path.join(root, "package.json"), "utf8"),
 );
 const expectedPackages = new Map([
+	["pi-ask-user-question", "@simplecyon/pi-ask-user-question"],
 	["pi-context-compact", "@simplecyon/pi-context-compact"],
 	["pi-context-inspector", "@simplecyon/pi-context-inspector"],
 	["pi-memory", "@simplecyon/pi-memory"],
@@ -22,7 +23,7 @@ test("aggregate manifest points to existing package resources", () => {
 		...(manifest.pi?.extensions ?? []),
 		...(manifest.pi?.themes ?? []),
 	];
-	assert.equal(resources.length, 7);
+	assert.equal(resources.length, 8);
 	for (const resource of resources) {
 		assert.equal(
 			fs.existsSync(path.resolve(root, resource)),

@@ -7,6 +7,7 @@ Cyon's package-only extensions and themes for
 
 | Workspace | Package | Purpose |
 | --- | --- | --- |
+| [`packages/pi-ask-user-question`](packages/pi-ask-user-question) | `@simplecyon/pi-ask-user-question` | Structured human-in-the-loop questions with exclusive TUI focus |
 | [`packages/pi-minimal-tui`](packages/pi-minimal-tui) | `@simplecyon/pi-minimal-tui` | Compact tool-event rendering and the `cyon-minimal-dark` theme |
 | [`packages/pi-memory`](packages/pi-memory) | `@simplecyon/pi-memory` | Cache-stable memory injection with scope-aware progressive disclosure |
 | [`packages/pi-context-compact`](packages/pi-context-compact) | `@simplecyon/pi-context-compact` | Durable compaction checkpoints and cold-history search |
@@ -22,6 +23,7 @@ fork with its own history, build system, and release cadence.
 Every workspace is an independent public npm package:
 
 ```bash
+pi install npm:@simplecyon/pi-ask-user-question
 pi install npm:@simplecyon/pi-minimal-tui
 pi install npm:@simplecyon/pi-memory
 pi install npm:@simplecyon/pi-context-compact
@@ -52,7 +54,7 @@ For local development:
 pi install -l --approve /absolute/path/to/pi-packages
 ```
 
-The repository root is an aggregate Git package. Its manifest exposes all six
+The repository root is an aggregate Git package. Its manifest exposes all seven
 extensions and the bundled theme. The npm packages are separate distribution
 units with independent manifests, versions, tests, and compatibility boundaries.
 

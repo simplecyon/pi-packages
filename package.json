@@ -21,6 +21,7 @@
   },
   "pi": {
     "extensions": [
+      "./packages/pi-ask-user-question/src/index.ts",
       "./packages/pi-minimal-tui/src/index.ts",
       "./packages/pi-memory/src/index.ts",
       "./packages/pi-context-compact/src/index.ts",
