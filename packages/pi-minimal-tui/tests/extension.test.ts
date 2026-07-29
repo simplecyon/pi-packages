@@ -58,7 +58,7 @@ test("decorated read definition renders a real compact call and honors expanded 
 	};
 
 	const call = read.renderCall?.({ path: "README.md" }, theme, baseContext as any);
-	assert.deepEqual(call?.render(80), ["·read README.md"]);
+	assert.deepEqual(call?.render(80), ["• read README.md"]);
 
 	const collapsedResult = read.renderResult?.(
 		{ content: [{ type: "text", text: "line one\nline two" }], details: undefined },
@@ -91,13 +91,13 @@ test("all decorated built-ins produce one background-free collapsed summary row"
 		},
 	} as Theme;
 	const cases = [
-		["read", { path: "README.md" }, "·read README.md"],
-		["bash", { command: "npm test" }, "·bash npm test"],
-		["edit", { path: "src/index.ts", oldText: "a", newText: "b" }, "·edit src/index.ts"],
-		["write", { path: "src/new.ts", content: "" }, "·write src/new.ts"],
-		["grep", { pattern: "renderShell", path: "src" }, "·grep \"renderShell\" in src"],
-		["find", { pattern: "*.ts", path: "src" }, "·find \"*.ts\" in src"],
-		["ls", { path: "src" }, "·ls src"],
+		["read", { path: "README.md" }, "• read README.md"],
+		["bash", { command: "npm test" }, "• bash npm test"],
+		["edit", { path: "src/index.ts", oldText: "a", newText: "b" }, "• edit src/index.ts"],
+		["write", { path: "src/new.ts", content: "" }, "• write src/new.ts"],
+		["grep", { pattern: "renderShell", path: "src" }, "• grep \"renderShell\" in src"],
+		["find", { pattern: "*.ts", path: "src" }, "• find \"*.ts\" in src"],
+		["ls", { path: "src" }, "• ls src"],
 	] as const;
 
 	for (const [name, args, expected] of cases) {
@@ -156,7 +156,7 @@ test("collapsed mixed actions render only one aggregate row", () => {
 	const bash = renderCall("bash", "call-bash", { command: "npm test" });
 	const read = renderCall("read", "call-read", { path: "README.md" });
 	assert.deepEqual(bash?.render(100), []);
-	assert.deepEqual(read?.render(100), ["Ran 1 shell command, read 1 file"]);
+	assert.deepEqual(read?.render(100), ["• Ran 1 shell command, read 1 file"]);
 });
 
 test("bash timeout stays collapsed and annotates the call summary", () => {
@@ -201,7 +201,7 @@ test("bash timeout stays collapsed and annotates the call summary", () => {
 		{ ...baseContext, lastComponent: undefined, isError: true } as any,
 	);
 
-	assert.deepEqual(call?.render(80), ["·bash npm run dev × timeout 30s"]);
+	assert.deepEqual(call?.render(80), ["• bash npm run dev × timeout 30s"]);
 	assert.deepEqual(result?.render(80), []);
 });
 
@@ -250,7 +250,7 @@ test("a completed edit uses the compact diff while collapsed", async () => {
 		const component = edit.renderCall?.(args, theme, context as any);
 		await invalidated;
 		const updated = edit.renderCall?.(args, theme, { ...context, lastComponent: component } as any);
-		assert.deepEqual(updated?.render(100), ["·edit sample.ts"]);
+		assert.deepEqual(updated?.render(100), ["• edit sample.ts"]);
 
 		const result = edit.renderResult?.(
 			{

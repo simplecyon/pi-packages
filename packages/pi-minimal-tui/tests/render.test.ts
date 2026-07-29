@@ -35,7 +35,7 @@ test("collapsed call renders one compact event row", () => {
 		false,
 		theme,
 	);
-	assert.deepEqual(component.render(80), ["·read docs: extensions.md"]);
+	assert.deepEqual(component.render(80), ["• read docs: extensions.md"]);
 });
 
 test("expanded state restores an item hidden by its collapsed group", () => {
@@ -55,7 +55,7 @@ test("expanded state restores an item hidden by its collapsed group", () => {
 		theme,
 		{ getGroupView: () => ({ hidden: true }) },
 	);
-	assert.deepEqual(component.render(80), ["·read README.md", "  file contents"]);
+	assert.deepEqual(component.render(80), ["• read README.md", "  file contents"]);
 });
 
 test("expanded call keeps summary and indents original body", () => {
@@ -65,7 +65,7 @@ test("expanded call keeps summary and indents original body", () => {
 		true,
 		theme,
 	);
-	assert.deepEqual(component.render(80), ["·write src/index.ts", "  const value = 1;"]);
+	assert.deepEqual(component.render(80), ["• write src/index.ts", "  const value = 1;"]);
 });
 
 test("edit calls can keep diff details visible while collapsed", () => {
@@ -77,7 +77,7 @@ test("edit calls can keep diff details visible while collapsed", () => {
 		{ showInnerCollapsed: true },
 	);
 	assert.deepEqual(component.render(80), [
-		"·edit src/index.ts",
+		"• edit src/index.ts",
 		"   1 -const oldValue = 1;",
 		"   1 +const newValue = 2;",
 	]);

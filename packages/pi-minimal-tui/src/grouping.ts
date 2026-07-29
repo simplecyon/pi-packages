@@ -38,7 +38,7 @@ export function formatGroupedSummary(toolNames: readonly string[]): ToolSummary 
 	if (search) clauses.push(`${clauses.length ? "searched" : "Searched"} ${countLabel(search, "time")}`);
 	if (list) clauses.push(`${clauses.length ? "listed" : "Listed"} ${countLabel(list, "directory", "directories")}`);
 
-	return clauses.length ? { verb: clauses.join(", "), bullet: false } : undefined;
+	return clauses.length ? { verb: clauses.join(", ") } : undefined;
 }
 
 function sameView(left: GroupView | undefined, right: GroupView | undefined): boolean {

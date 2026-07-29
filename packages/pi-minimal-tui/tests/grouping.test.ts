@@ -5,11 +5,9 @@ import { ActionGroupCoordinator, formatGroupedSummary } from "../src/grouping.ts
 test("formats mixed action counts with natural singulars and plurals", () => {
 	assert.deepEqual(formatGroupedSummary(["bash", "bash", "read"]), {
 		verb: "Ran 2 shell commands, read 1 file",
-		bullet: false,
 	});
 	assert.deepEqual(formatGroupedSummary(["read", "read"]), {
 		verb: "Read 2 files",
-		bullet: false,
 	});
 	assert.equal(formatGroupedSummary(["bash"]), undefined);
 });
@@ -26,7 +24,7 @@ test("the last row represents a group and invalidates earlier rows", () => {
 	assert.deepEqual(grouping.getView("call-1"), { hidden: true, summary: undefined });
 	assert.deepEqual(grouping.getView("call-2"), {
 		hidden: false,
-		summary: { verb: "Ran 1 shell command, read 1 file", bullet: false },
+		summary: { verb: "Ran 1 shell command, read 1 file" },
 	});
 	assert.equal(firstInvalidations, 1);
 });
@@ -126,6 +124,6 @@ test("tool calls after one thinking block remain in the same batch", () => {
 	assert.deepEqual(grouping.getView("call-1"), { hidden: true, summary: undefined });
 	assert.deepEqual(grouping.getView("call-2"), {
 		hidden: false,
-		summary: { verb: "Ran 1 shell command, read 1 file", bullet: false },
+		summary: { verb: "Ran 1 shell command, read 1 file" },
 	});
 });
