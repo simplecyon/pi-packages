@@ -5,6 +5,8 @@ export const GROUPABLE_TOOLS = new Set(["bash", "read", "grep", "find", "ls"]);
 export interface GroupView {
 	hidden: boolean;
 	summary?: ToolSummary;
+	marker?: "middle" | "last";
+	elapsedMs?: number;
 }
 
 interface ActionRecord {
@@ -16,6 +18,7 @@ interface ActionRecord {
 
 interface BoundaryRecord {
 	kind: "boundary";
+	elapsedMs?: number;
 }
 
 type SequenceRecord = ActionRecord | BoundaryRecord;
@@ -45,7 +48,9 @@ function sameView(left: GroupView | undefined, right: GroupView | undefined): bo
 	return (
 		left?.hidden === right?.hidden &&
 		left?.summary?.verb === right?.summary?.verb &&
-		left?.summary?.detail === right?.summary?.detail
+		left?.summary?.detail === right?.summary?.detail &&
+		left?.marker === right?.marker &&
+		left?.elapsedMs === right?.elapsedMs
 	);
 }
 
@@ -82,12 +87,14 @@ export class ActionGroupCoordinator {
 	private actions = new Map<string, ActionRecord>();
 	private views = new Map<string, GroupView>();
 	private invalidators = new Map<string, () => void>();
+	private agentStartedAt: number | undefined;
 
 	reset(): void {
 		this.sequence = [];
 		this.actions.clear();
 		this.views.clear();
 		this.invalidators.clear();
+		this.agentStartedAt = undefined;
 	}
 
 	registerRenderer(toolCallId: string, invalidate: () => void): void {
@@ -102,6 +109,23 @@ export class ActionGroupCoordinator {
 		if (this.sequence.at(-1)?.kind !== "boundary") {
 			this.sequence.push({ kind: "boundary" });
 		}
+	}
+
+	startAgent(startedAt = Date.now()): void {
+		this.agentStartedAt = startedAt;
+	}
+
+	finishAgent(finishedAt = Date.now()): void {
+		const elapsedMs =
+			this.agentStartedAt === undefined ? undefined : Math.max(0, finishedAt - this.agentStartedAt);
+		this.agentStartedAt = undefined;
+		const lastRecord = this.sequence.at(-1);
+		if (lastRecord?.kind === "boundary") {
+			lastRecord.elapsedMs = elapsedMs;
+		} else {
+			this.sequence.push({ kind: "boundary", elapsedMs });
+		}
+		this.recompute();
 	}
 
 	recordTool(toolCallId: string, toolName: string): void {
@@ -135,9 +159,7 @@ export class ActionGroupCoordinator {
 
 		for (const block of messageContent(message)) {
 			const type = stringField(block, "type");
-			if (type === "thinking") {
-				this.addBoundary();
-			} else if (type === "toolCall") {
+			if (type === "toolCall") {
 				const id = stringField(block, "id", "toolCallId");
 				const name = stringField(block, "name", "toolName");
 				if (id && name) this.recordTool(id, name);
@@ -172,30 +194,47 @@ export class ActionGroupCoordinator {
 		const nextViews = new Map<string, GroupView>();
 		let group: ActionRecord[] = [];
 
-		const flush = () => {
+		const flushFinal = (elapsedMs?: number) => {
 			const summary = formatGroupedSummary(group.map((action) => action.name));
 			for (let index = 0; index < group.length; index += 1) {
 				const action = group[index];
 				if (!action) continue;
-				nextViews.set(action.id, {
+				const view: GroupView = {
 					hidden: Boolean(summary) && index < group.length - 1,
 					summary: summary && index === group.length - 1 ? summary : undefined,
-				});
+				};
+				if (elapsedMs !== undefined && index === group.length - 1) {
+					view.marker = "last";
+					view.elapsedMs = elapsedMs;
+				}
+				nextViews.set(action.id, view);
 			}
 			group = [];
 		};
 
 		for (const record of this.sequence) {
 			if (record.kind === "boundary") {
-				flush();
+				flushFinal(record.elapsedMs);
 			} else if (!GROUPABLE_TOOLS.has(record.name) || record.isError) {
-				flush();
+				flushFinal();
 				nextViews.set(record.id, { hidden: false });
 			} else {
 				group.push(record);
 			}
 		}
-		flush();
+		if (this.agentStartedAt === undefined) {
+			flushFinal();
+		} else {
+			const firstVisible = Math.max(0, group.length - 3);
+			for (let index = 0; index < group.length; index += 1) {
+				const action = group[index];
+				if (!action) continue;
+				nextViews.set(action.id, {
+					hidden: index < firstVisible,
+					marker: index === group.length - 1 ? "last" : "middle",
+				});
+			}
+		}
 
 		const previousViews = this.views;
 		const changedIds = new Set([...previousViews.keys(), ...nextViews.keys()]);

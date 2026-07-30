@@ -29,6 +29,58 @@ test("the last row represents a group and invalidates earlier rows", () => {
 	assert.equal(firstInvalidations, 1);
 });
 
+test("a running agent keeps only its three most recent actions visible", () => {
+	const grouping = new ActionGroupCoordinator();
+	grouping.startAgent(1_000);
+	grouping.recordTool("call-1", "ls");
+	grouping.recordTool("call-2", "read");
+	grouping.recordTool("call-3", "grep");
+	grouping.recordTool("call-4", "grep");
+
+	assert.deepEqual(grouping.getView("call-1"), { hidden: true, marker: "middle" });
+	assert.deepEqual(grouping.getView("call-2"), { hidden: false, marker: "middle" });
+	assert.deepEqual(grouping.getView("call-3"), { hidden: false, marker: "middle" });
+	assert.deepEqual(grouping.getView("call-4"), { hidden: false, marker: "last" });
+});
+
+test("agent completion replaces live actions with duration and one aggregate", () => {
+	const grouping = new ActionGroupCoordinator();
+	grouping.startAgent(1_000);
+	grouping.recordTool("call-list", "ls");
+	grouping.recordTool("call-read", "read");
+	grouping.recordTool("call-grep-1", "grep");
+	grouping.recordTool("call-grep-2", "grep");
+	grouping.finishAgent(31_000);
+
+	for (const id of ["call-list", "call-read", "call-grep-1"]) {
+		assert.deepEqual(grouping.getView(id), { hidden: true, summary: undefined });
+	}
+	assert.deepEqual(grouping.getView("call-grep-2"), {
+		hidden: false,
+		summary: { verb: "Read 1 file, searched 2 times, listed 1 directory" },
+		marker: "last",
+		elapsedMs: 30_000,
+	});
+
+	grouping.startAgent(40_000);
+	assert.equal(grouping.getView("call-grep-2")?.elapsedMs, 30_000);
+});
+
+test("completion keeps elapsed time when final assistant text already closed the action batch", () => {
+	const grouping = new ActionGroupCoordinator();
+	grouping.startAgent(5_000);
+	grouping.recordTool("call-read", "read");
+	grouping.recordTool("call-grep", "grep");
+	grouping.recordMessage({
+		role: "assistant",
+		content: [{ type: "text", text: "Here is what I found." }],
+	});
+	grouping.finishAgent(17_000);
+
+	assert.equal(grouping.getView("call-grep")?.elapsedMs, 12_000);
+	assert.equal(grouping.getView("call-grep")?.marker, "last");
+});
+
 test("boundaries and errors split action groups", () => {
 	const grouping = new ActionGroupCoordinator();
 	grouping.recordTool("call-1", "bash");
@@ -69,7 +121,7 @@ test("session replay does not merge actions across user turns", () => {
 	assert.equal(grouping.getView("call-2")?.summary, undefined);
 });
 
-test("thinking splits live action groups", () => {
+test("thinking does not split live action groups", () => {
 	const grouping = new ActionGroupCoordinator();
 	grouping.recordTool("call-1", "bash");
 	grouping.recordMessage({
@@ -78,11 +130,14 @@ test("thinking splits live action groups", () => {
 	});
 	grouping.recordTool("call-2", "read");
 
-	assert.deepEqual(grouping.getView("call-1"), { hidden: false, summary: undefined });
-	assert.deepEqual(grouping.getView("call-2"), { hidden: false, summary: undefined });
+	assert.deepEqual(grouping.getView("call-1"), { hidden: true, summary: undefined });
+	assert.deepEqual(grouping.getView("call-2"), {
+		hidden: false,
+		summary: { verb: "Read 1 file, ran 1 bash" },
+	});
 });
 
-test("session replay does not merge actions across thinking", () => {
+test("session replay merges actions across thinking", () => {
 	const grouping = new ActionGroupCoordinator();
 	grouping.rebuild([
 		{
@@ -106,8 +161,39 @@ test("session replay does not merge actions across thinking", () => {
 		},
 	]);
 
-	assert.deepEqual(grouping.getView("call-1"), { hidden: false, summary: undefined });
-	assert.deepEqual(grouping.getView("call-2"), { hidden: false, summary: undefined });
+	assert.deepEqual(grouping.getView("call-1"), { hidden: true, summary: undefined });
+	assert.deepEqual(grouping.getView("call-2"), {
+		hidden: false,
+		summary: { verb: "Read 1 file, ran 1 bash" },
+	});
+});
+
+test("file browsing actions merge across repeated thinking segments", () => {
+	const grouping = new ActionGroupCoordinator();
+	const actions = [
+		["call-list", "ls"],
+		["call-read", "read"],
+		["call-grep-1", "grep"],
+		["call-grep-2", "grep"],
+	] as const;
+
+	for (const [id, name] of actions) {
+		grouping.recordMessage({
+			role: "assistant",
+			content: [
+				{ type: "thinking", thinking: "Continue inspecting the code." },
+				{ type: "toolCall", id, name, arguments: {} },
+			],
+		});
+	}
+
+	for (const [id] of actions.slice(0, -1)) {
+		assert.deepEqual(grouping.getView(id), { hidden: true, summary: undefined });
+	}
+	assert.deepEqual(grouping.getView("call-grep-2"), {
+		hidden: false,
+		summary: { verb: "Read 1 file, searched 2 times, listed 1 directory" },
+	});
 });
 
 test("tool calls after one thinking block remain in the same batch", () => {

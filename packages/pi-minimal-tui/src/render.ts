@@ -63,8 +63,15 @@ function indentLine(line: string, width: number, preserveBackground = false): st
 	return truncateToWidth(`  ${rendered}`, width);
 }
 
-function summaryLine(summary: ToolSummary, theme: Theme, width: number, outcome?: string): string {
-	const bullet = summary.bullet === false ? "" : theme.fg("muted", "• ");
+function summaryLine(
+	summary: ToolSummary,
+	theme: Theme,
+	width: number,
+	outcome?: string,
+	marker?: GroupView["marker"],
+): string {
+	const markerText = marker === "middle" ? "⊢ " : marker === "last" ? "⨽ " : "• ";
+	const bullet = summary.bullet === false ? "" : theme.fg("muted", markerText);
 	const verb = theme.fg("toolTitle", summary.verb);
 	const detail = summary.detail ? ` ${theme.fg("muted", `(${summary.detail})`)}` : "";
 	const base = `${bullet}${theme.bold(`${verb}${detail}`)}`;
@@ -74,6 +81,14 @@ function summaryLine(summary: ToolSummary, theme: Theme, width: number, outcome?
 	const suffixWidth = visibleWidth(suffix);
 	if (suffixWidth >= width) return truncateToWidth(suffix.trimStart(), width);
 	return `${truncateToWidth(base, width - suffixWidth)}${suffix}`;
+}
+
+export function formatThoughtDuration(elapsedMs: number): string {
+	const seconds = Math.max(1, Math.round(elapsedMs / 1000));
+	if (seconds < 60) return `${seconds}s`;
+	const minutes = Math.floor(seconds / 60);
+	const remainder = seconds % 60;
+	return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
 }
 
 interface MinimalToolCallOptions {
@@ -121,7 +136,19 @@ export class MinimalToolCallComponent implements Component {
 		const groupView = this.expanded ? undefined : this.options.getGroupView?.();
 		if (groupView?.hidden) return [];
 		const summary = groupView?.summary ?? this.summary;
-		const lines = [summaryLine(summary, this.theme, width, this.options.outcome)];
+		const lines =
+			groupView?.elapsedMs === undefined
+				? []
+				: [
+						truncateToWidth(
+							`${this.theme.fg("muted", "• ")}${this.theme.fg(
+								"thinkingText",
+								`Thought for ${formatThoughtDuration(groupView.elapsedMs)}`,
+							)}`,
+							width,
+						),
+					];
+		lines.push(summaryLine(summary, this.theme, width, this.options.outcome, groupView?.marker));
 		if ((!this.expanded && !this.options.showInnerCollapsed) || !this.inner || width <= 0) return lines;
 
 		const rendered = trimEmptyEdges(this.inner.render(Math.max(1, width - 2)).map(stripBackgroundAnsi));

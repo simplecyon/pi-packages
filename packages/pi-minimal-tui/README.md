@@ -8,15 +8,19 @@ Compact, low-noise rendering for Pi's built-in tool events, plus the
 - Collapsed tool calls use a consistent `Category (detail)` shape, such as
   `• Read (extensions.md)` and `• Bash (npm test)`. File actions show only the
   final filename; search and shell actions keep a bounded intent string.
-- Consecutive `bash`, `read`, `grep`, `find`, and `ls` actions within one
-  execution batch collapse into a natural-language count summary such as
-  `• Read 2 files, ran 1 bash`. A new Thinking segment,
-  visible assistant content, user turn, error, or non-groupable tool starts a
-  new batch.
+- While an agent run is active, consecutive `bash`, `read`, `grep`, `find`, and
+  `ls` actions keep only the three most recent rows visible. Earlier rows use
+  `⊢`, and the latest row uses `⨽`, for example `⊢ Read (Layout.tsx)` followed
+  by `⨽ Grep (handleOpenPasswordDialog)`.
+- When the run ends, those live rows collapse into two compact lines:
+  `• Thought for 30s` and a natural-language aggregate such as
+  `⨽ Read 2 files, ran 1 bash`. Thinking may occur between actions without
+  splitting the batch. Visible assistant content, a user turn, an error, or a
+  non-groupable tool starts a new batch.
 - A single action keeps its descriptive verb-and-target row.
-- Aggregated and single-action rows share the same larger `• ` marker and text
-  column. Event text uses the terminal's bold/semibold face as the closest
-  available approximation to font weight 500.
+- Aggregated and single-action rows keep one aligned marker column. Event text
+  uses the terminal's bold/semibold face as the closest available approximation
+  to font weight 500.
 - Bash failures stay compact while retaining outcomes such as timeout or exit
   status.
 - Collapsed edits show a high-contrast compact diff with one context line, a
@@ -76,9 +80,12 @@ theme additionally tunes user-message and fallback surface colors.
 
 ## Deliberate boundaries
 
-The package does not simulate thinking duration, automatic thinking collapse,
-or mouse interaction because Pi 0.82.x does not expose those interactive-core
-hooks to packages.
+`Thought for …` measures the public `agent_start` → `agent_end` lifecycle, so
+it is the elapsed agent-run time (including tool execution), not a model-
+reported private thinking duration. Pi 0.82.x does not expose per-message
+thinking timing or let packages replace each historical hidden-thinking label;
+the package therefore leaves Pi's native live `Thinking...` rendering intact.
+It also does not add mouse interaction.
 
 It decorates public built-in tool definitions rather than reimplementing tool
 execution. Renderer contracts can still change between Pi minor versions.

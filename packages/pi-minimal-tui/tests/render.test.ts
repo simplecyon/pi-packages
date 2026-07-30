@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
-import { MinimalToolCallComponent, MinimalToolResultComponent, renderedWidth, stripBackgroundAnsi } from "../src/render.ts";
+import {
+	formatThoughtDuration,
+	MinimalToolCallComponent,
+	MinimalToolResultComponent,
+	renderedWidth,
+	stripBackgroundAnsi,
+} from "../src/render.ts";
 
 const theme = {
 	fg(_color: string, text: string) {
@@ -39,6 +45,38 @@ test("collapsed call renders one compact event row", () => {
 		theme,
 	);
 	assert.deepEqual(component.render(80), ["• Read (extensions.md)"]);
+});
+
+test("running group rows use branch markers", () => {
+	const middle = new MinimalToolCallComponent({ verb: "Read", detail: "Layout.tsx" }, undefined, false, theme, {
+		getGroupView: () => ({ hidden: false, marker: "middle" }),
+	});
+	const last = new MinimalToolCallComponent({ verb: "Grep", detail: "handleOpenPasswordDialog" }, undefined, false, theme, {
+		getGroupView: () => ({ hidden: false, marker: "last" }),
+	});
+
+	assert.deepEqual(middle.render(80), ["⊢ Read (Layout.tsx)"]);
+	assert.deepEqual(last.render(80), ["⨽ Grep (handleOpenPasswordDialog)"]);
+});
+
+test("completed group renders elapsed time above its aggregate", () => {
+	const component = new MinimalToolCallComponent(
+		{ verb: "Grep", detail: "password" },
+		undefined,
+		false,
+		theme,
+		{
+			getGroupView: () => ({
+				hidden: false,
+				summary: { verb: "Read 1 file, searched 2 times" },
+				marker: "last",
+				elapsedMs: 30_000,
+			}),
+		},
+	);
+
+	assert.deepEqual(component.render(80), ["• Thought for 30s", "⨽ Read 1 file, searched 2 times"]);
+	assert.equal(formatThoughtDuration(65_000), "1m 5s");
 });
 
 test("action event text uses the terminal medium-weight approximation", () => {

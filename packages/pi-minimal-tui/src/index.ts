@@ -166,6 +166,9 @@ export default function minimalTuiExtension(pi: ExtensionAPI): void {
 	pi.on("message_start", (event) => {
 		if (event.message.role === "user") grouping.addBoundary();
 	});
+	pi.on("agent_start", () => {
+		grouping.startAgent();
+	});
 	pi.on("message_end", (event) => {
 		grouping.recordMessage(event.message);
 	});
@@ -176,7 +179,7 @@ export default function minimalTuiExtension(pi: ExtensionAPI): void {
 		if (event.isError) grouping.markError(event.toolCallId);
 	});
 	pi.on("agent_end", () => {
-		grouping.addBoundary();
+		grouping.finishAgent();
 	});
 
 	for (const definition of createMinimalToolDefinitions(cwd, grouping)) {
