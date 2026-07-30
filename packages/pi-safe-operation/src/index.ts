@@ -88,6 +88,15 @@ interface TrashManifest {
   }>;
 }
 
+interface ApprovalCopy {
+  action: string;
+  worthWhen: string;
+  risks: string[];
+  impact?: string[];
+  saferChoice?: string;
+  technicalDetails?: string;
+}
+
 const DEFAULT_CONFIG: SafeOperationConfig = {
   version: 1,
   mode: "balanced",
@@ -481,6 +490,25 @@ function targetLines(targets: InspectedTarget[]): string {
   ).join("\n");
 }
 
+function readableTargetLines(targets: InspectedTarget[]): string[] {
+  const kindLabels: Record<FileKind, string> = {
+    file: "文件",
+    directory: "目录",
+    symlink: "符号链接",
+    other: "其他类型",
+    missing: "不存在",
+  };
+  const gitLabels: Record<GitClass, string> = {
+    tracked: "已被 Git 跟踪",
+    ignored: "被 Git 忽略",
+    untracked: "未被 Git 跟踪",
+    outside: "位于 Git 仓库外",
+  };
+  return targets.map((target) =>
+    `${target.requested} — ${kindLabels[target.kind]}，${gitLabels[target.gitClass]}`
+  );
+}
+
 function mixedTargetReason(targets: InspectedTarget[]): string | null {
   const kinds = new Set(targets.map((target) => target.kind === "directory" ? "directory" : "non-directory"));
   if (kinds.size > 1) return "Deletion mixes files and directories. Split them into separate operations.";
@@ -503,6 +531,111 @@ function dangerousCommandReasons(command: string): string[] {
     [/\b(?:npm|pnpm|yarn|brew|pip|apt|dnf)\b[^;&|\n]*\b(?:uninstall|remove|purge)\b/i, "package removal"],
   ];
   return rules.filter(([pattern]) => pattern.test(command)).map(([, reason]) => reason);
+}
+
+function readableRisk(reason: string): string {
+  const known: Record<string, string> = {
+    "force push rewrites remote history":
+      "会改写远端分支历史；其他人的提交可能消失，现有拉取记录也可能需要手动修复。",
+    "git reset --hard discards work":
+      "会丢弃工作区和暂存区中尚未提交的修改，通常无法自动恢复。",
+    "git restore/checkout may discard work":
+      "会用 Git 中的版本覆盖当前文件，未提交内容可能丢失。",
+    "forced branch deletion":
+      "会强制删除本地分支；尚未合并或未推送的提交可能失去常规入口。",
+    "privilege escalation":
+      "会以更高系统权限执行；影响可能超出当前项目，并修改系统级文件。",
+    "recursive permission or ownership change":
+      "会递归修改目录下所有内容的权限或所有者，可能导致应用无法读写。",
+    "raw disk operation":
+      "会直接写入磁盘或设备，目标选择错误可能破坏大量数据。",
+    "filesystem creation destroys existing data":
+      "会创建新文件系统，目标设备上的现有数据会被清除。",
+    "drive formatting":
+      "会格式化整个磁盘分区，分区中的数据将被清除。",
+    "package removal":
+      "会卸载软件包，依赖它的命令、项目或系统功能可能立即失效。",
+    "strict mode requires approval for write/edit":
+      "当前启用了严格模式，任何文件写入或编辑都必须由你确认。",
+    "strict mode requires approval for mutating Bash":
+      "当前启用了严格模式，这条命令会修改文件或项目状态。",
+    "target already has uncommitted changes":
+      "目标文件已有未提交修改；继续编辑会叠加变化，之后更难区分或撤销。",
+  };
+  if (known[reason]) return known[reason];
+  if (reason.startsWith("protected path: ")) {
+    return `目标属于受保护路径 ${reason.slice("protected path: ".length)}，修改可能破坏安全配置或项目元数据。`;
+  }
+  if (reason.startsWith("mutation references protected path: ")) {
+    return `命令涉及受保护路径 ${reason.slice("mutation references protected path: ".length)}，可能破坏安全配置或项目元数据。`;
+  }
+  if (reason.startsWith("code output inside vault knowledge directory: ")) {
+    return `将代码写入知识库目录 ${reason.slice("code output inside vault knowledge directory: ".length)}，会混淆文档与代码产物。`;
+  }
+  if (reason.startsWith("code mutation references vault knowledge directory: ")) {
+    return `命令会在知识库目录 ${reason.slice("code mutation references vault knowledge directory: ".length)} 修改代码文件。`;
+  }
+  if (reason.startsWith("overwrite existing ")) {
+    return "会覆盖一个已存在且未被 Git 正常跟踪的文件，旧内容可能无法从版本历史恢复。";
+  }
+  return reason;
+}
+
+function operationCopyForReasons(reasons: string[]): Pick<ApprovalCopy, "action" | "worthWhen" | "saferChoice"> {
+  if (reasons.includes("force push rewrites remote history")) {
+    return {
+      action: "强制推送 Git 分支，并改写远端提交历史。",
+      worthWhen: "你明确需要让远端历史与本地历史一致，并确认协作者不会依赖当前远端提交。",
+      saferChoice: "优先使用普通 git push；必须改写历史时，优先使用 --force-with-lease 并先确认远端最新状态。",
+    };
+  }
+  if (reasons.includes("git reset --hard discards work")) {
+    return {
+      action: "把工作区和暂存区强制重置到指定 Git 提交。",
+      worthWhen: "你确认所有未提交修改都不再需要，或已经另行备份。",
+      saferChoice: "先查看 git status 和 git diff；需要保留内容时先提交或创建补丁。",
+    };
+  }
+  if (reasons.includes("git restore/checkout may discard work")) {
+    return {
+      action: "用 Git 中的版本覆盖当前文件内容。",
+      worthWhen: "你确认当前未提交内容可以丢弃，且目标版本就是需要恢复的版本。",
+      saferChoice: "先查看 git diff；只恢复明确文件，并先保存仍有价值的修改。",
+    };
+  }
+  if (reasons.includes("forced branch deletion")) {
+    return {
+      action: "强制删除一个本地 Git 分支。",
+      worthWhen: "你确认该分支的提交已经合并、推送，或确定不再需要。",
+      saferChoice: "先使用 git branch -d；它会拒绝删除尚未合并的分支。",
+    };
+  }
+  if (reasons.includes("package removal")) {
+    return {
+      action: "从当前环境卸载一个或多个软件包。",
+      worthWhen: "你确认这些软件包不再被项目、命令或系统功能依赖。",
+      saferChoice: "先确认依赖关系和安装范围；不确定时取消并查看包管理器的依赖信息。",
+    };
+  }
+  if (reasons.some((reason) => ["raw disk operation", "filesystem creation destroys existing data", "drive formatting"].includes(reason))) {
+    return {
+      action: "直接修改磁盘、设备或文件系统。",
+      worthWhen: "你已核对设备标识，并确认目标介质上的数据可以被覆盖。",
+      saferChoice: "先停止并再次核对设备路径、容量和备份；不要凭名称猜测目标磁盘。",
+    };
+  }
+  if (reasons.includes("privilege escalation")) {
+    return {
+      action: "以管理员权限执行一条系统级命令。",
+      worthWhen: "当前任务确实需要系统权限，且你理解命令对项目外文件的影响。",
+      saferChoice: "优先使用不需要 sudo 的项目级方案；不确定影响范围时取消。",
+    };
+  }
+  return {
+    action: "执行一条会修改文件、权限或项目状态的命令。",
+    worthWhen: "它与当前任务目标一致，并且下面列出的影响范围和风险都在你的预期内。",
+    saferChoice: "不确定时先取消，要求查看 diff、预览结果或进一步缩小操作范围。",
+  };
 }
 
 function looksLikeMutatingBash(command: string): boolean {
@@ -542,6 +675,24 @@ function privateKeyPath(filePath: string): string | null {
 
 function commandSummary(command: string): string {
   return `Command (complete):\n${command}`;
+}
+
+function approvalMessage(copy: ApprovalCopy): string {
+  const sections = [
+    `准备执行\n  ${copy.action}`,
+    `只有在以下情况才值得继续\n  ${copy.worthWhen}`,
+    `你需要知道的风险\n${copy.risks.map((risk) => `  • ${risk}`).join("\n")}`,
+  ];
+  if (copy.impact?.length) {
+    sections.push(`影响对象\n${copy.impact.map((item) => `  • ${item}`).join("\n")}`);
+  }
+  if (copy.saferChoice) {
+    sections.push(`更安全的选择\n  ${copy.saferChoice}`);
+  }
+  if (copy.technicalDetails) {
+    sections.push(`技术详情（仅供核对）\n${copy.technicalDetails}`);
+  }
+  return sections.join("\n\n");
 }
 
 function safeStringify(value: unknown): string {
@@ -838,8 +989,19 @@ export default function (pi: ExtensionAPI) {
         }
         if (reasons.length === 0) return;
 
-        const message = `Target:\n  ${filePath}\n\nSafety findings:\n${reasons.map((reason) => `  - ${reason}`).join("\n")}\n\nProceed?`;
-        const ok = await confirmOperation(ctx, "⚠️ Safe operation gate", message, {
+        const writeAction =
+          event.toolName === "edit"
+            ? `编辑文件 ${filePath}。`
+            : fs.existsSync(absolute)
+              ? `覆盖文件 ${filePath}。`
+              : `创建文件 ${filePath}。`;
+        const ok = await confirmOperation(ctx, "确认文件修改", approvalMessage({
+          action: writeAction,
+          worthWhen: "这是当前任务需要修改的文件，并且现有内容已保留、可恢复或确定不再需要。",
+          risks: unique(reasons).map(readableRisk),
+          impact: [filePath],
+          saferChoice: "不确定时先取消，查看现有内容和 diff，或先备份目标文件。",
+        }), {
           tool: event.toolName,
           path: filePath,
           reasons,
@@ -875,8 +1037,18 @@ export default function (pi: ExtensionAPI) {
         if (parsed.kind === "git-clean") {
           const ok = await confirmOperation(
             ctx,
-            "⚠️ Git clean",
-            `${commandSummary(command)}\n\nGit clean permanently removes untracked files. Execute?`,
+            "确认清理 Git 未跟踪文件",
+            approvalMessage({
+              action: "永久删除当前仓库中被 git clean 匹配到的未跟踪文件。",
+              worthWhen: "你明确要清理这些未跟踪文件，并且已经用 git clean -nd 检查过将被删除的清单。",
+              risks: [
+                "未跟踪文件不在 Git 历史中，删除后通常无法恢复。",
+                "命令中的范围选项可能一次匹配多个目录和文件。",
+              ],
+              impact: ["当前 Git 仓库中由该命令匹配的未跟踪文件"],
+              saferChoice: "先运行 git clean -nd 只预览，不执行删除。",
+              technicalDetails: redactText(command).text,
+            }),
             { tool: "bash", operation: "git-clean", command: redactText(command).text },
           );
           if (!ok) return { block: true, reason: "git clean blocked by pi-safe-operation" };
@@ -930,8 +1102,20 @@ export default function (pi: ExtensionAPI) {
         }
         const ok = await confirmOperation(
           ctx,
-          "⚠️ Permanent deletion",
-          `${commandSummary(command)}\n\nResolved targets:\n${targetLines(targets)}\n\nPrefer safe_delete for recoverability. Execute permanently?`,
+          "确认永久删除",
+          approvalMessage({
+            action: `永久删除 ${targets.length} 个目标，不经过 safe-operation 回收站。`,
+            worthWhen: "你逐项确认这些目标都不再需要，并接受它们可能无法恢复。",
+            risks: unique([
+              "这是永久删除，safe_restore 无法恢复这些目标。",
+              targets.some((target) => target.gitClass !== "tracked")
+                ? "未被 Git 跟踪或被 Git 忽略的内容可能没有任何版本可找回。"
+                : "已被 Git 跟踪的文件可从提交恢复，但其中未提交的修改仍会丢失。",
+            ]),
+            impact: readableTargetLines(targets),
+            saferChoice: "改用 safe_delete，把目标先移动到可恢复回收站。",
+            technicalDetails: redactText(command).text,
+          }),
           { tool: "bash", operation: "delete", targets: targets.map((target) => target.relative) },
         );
         if (!ok) return { block: true, reason: "Permanent deletion blocked by pi-safe-operation" };
@@ -947,13 +1131,19 @@ export default function (pi: ExtensionAPI) {
         if (knowledgeDir) reasons.push(`code mutation references vault knowledge directory: ${knowledgeDir}/`);
       }
       if (reasons.length === 0) return;
+      const uniqueReasons = unique(reasons);
+      const operationCopy = operationCopyForReasons(uniqueReasons);
       const ok = await confirmOperation(
         ctx,
-        "⚠️ Safe operation gate",
-        `${commandSummary(command)}\n\nSafety findings:\n${unique(reasons).map((reason) => `  - ${reason}`).join("\n")}\n\nExecute?`,
-        { tool: "bash", operation: "dangerous-command", reasons: unique(reasons), command: redactText(command).text },
+        "确认高风险操作",
+        approvalMessage({
+          ...operationCopy,
+          risks: uniqueReasons.map(readableRisk),
+          technicalDetails: redactText(command).text,
+        }),
+        { tool: "bash", operation: "dangerous-command", reasons: uniqueReasons, command: redactText(command).text },
       );
-      if (!ok) return { block: true, reason: `Command blocked by pi-safe-operation: ${unique(reasons).join("; ")}` };
+      if (!ok) return { block: true, reason: `Command blocked by pi-safe-operation: ${uniqueReasons.join("; ")}` };
     } catch (error) {
       blockedTotal += 1;
       const reason = error instanceof Error ? error.message : safeStringify(error);
@@ -1125,8 +1315,17 @@ export default function (pi: ExtensionAPI) {
       }
 
       const approved = await ctx.ui.confirm(
-        "Move targets to recoverable trash?",
-        `Reason:\n  ${redactText(params.reason).text}\n\nExact targets:\n${targetLines(targets)}\n\nContinue?`,
+        "确认移动到可恢复回收站",
+        approvalMessage({
+          action: `把 ${targets.length} 个目标从原位置移动到 safe-operation 回收站。`,
+          worthWhen: `你确实要从当前工作区移除这些目标。Agent 提供的原因是：${redactText(params.reason).text}`,
+          risks: [
+            "目标会立即从原路径消失，依赖这些路径的任务可能停止工作。",
+            "内容仍保存在项目的 .trash 目录中并占用磁盘空间。",
+          ],
+          impact: readableTargetLines(targets),
+          saferChoice: "这是比永久删除更安全的方式；确认清单无误后可继续，之后可用 safe_restore 恢复。",
+        }),
       );
       if (!approved) {
         blockedTotal += 1;
@@ -1417,14 +1616,17 @@ export default function (pi: ExtensionAPI) {
         return fail("interactive approval is required");
       }
       const approved = await ctx.ui.confirm(
-        "Restore targets from recoverable trash?",
-        [
-          `Reason:\n  ${redactText(params.reason).text}`,
-          "Exact mappings:",
-          ...restorations.map((item) => `  ${item.trashed}\n    -> ${item.original}`),
-          "",
-          "Continue?",
-        ].join("\n"),
+        "确认恢复回收站内容",
+        approvalMessage({
+          action: `把 ${restorations.length} 个目标从 safe-operation 回收站恢复到原路径。`,
+          worthWhen: `你需要这些目标重新出现在工作区。Agent 提供的原因是：${redactText(params.reason).text}`,
+          risks: [
+            "恢复后文件会重新参与当前项目，可能改变构建、搜索或运行结果。",
+            "恢复操作会移动回收站内容；成功后原回收站位置将不再保留该副本。",
+          ],
+          impact: restorations.map((item) => `${item.trashed} → ${item.original}`),
+          saferChoice: "目标路径已检查为不存在；仍不确定时先取消并查看 manifest 与当前工作区状态。",
+        }),
       );
       if (!approved) {
         blockedTotal += 1;

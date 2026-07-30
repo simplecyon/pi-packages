@@ -222,6 +222,57 @@ test("shows every explicit deletion target without command truncation", async ()
     assert.equal(result?.block, true);
     for (const name of names) assert.match(prompt, new RegExp(name.replace(".", "\\.")));
     assert.doesNotMatch(prompt, /…/);
+    assert.match(prompt, /准备执行/);
+    assert.match(prompt, /只有在以下情况才值得继续/);
+    assert.match(prompt, /你需要知道的风险/);
+    assert.match(prompt, /影响对象/);
+    assert.match(prompt, /更安全的选择/);
+    assert.match(prompt, /技术详情（仅供核对）/);
+    assert.match(prompt, /safe_delete/);
+    assert.doesNotMatch(prompt, /Command \(complete\)|Safety findings|Execute\?/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("explains a force push in decision language before showing the command", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-force-push-copy-"));
+  try {
+    const extension = await loadSafeOperation(tmp);
+    const handler = extension.handlers.get("tool_call")?.[0];
+    assert.ok(handler);
+    let title = "";
+    let prompt = "";
+    const command = "git push --force origin main";
+
+    const result = await handler(
+      {
+        type: "tool_call",
+        toolName: "bash",
+        toolCallId: "force-push-copy",
+        input: { command },
+      },
+      {
+        ...baseContext(tmp, true),
+        ui: {
+          confirm: async (nextTitle: string, message: string) => {
+            title = nextTitle;
+            prompt = message;
+            return false;
+          },
+          input: async () => undefined,
+          notify: () => {},
+        },
+      },
+    );
+
+    assert.equal(result?.block, true);
+    assert.equal(title, "确认高风险操作");
+    assert.match(prompt, /强制推送 Git 分支，并改写远端提交历史/);
+    assert.match(prompt, /其他人的提交可能消失/);
+    assert.match(prompt, /--force-with-lease/);
+    assert.ok(prompt.indexOf("准备执行") < prompt.indexOf(command));
+    assert.ok(prompt.indexOf("你需要知道的风险") < prompt.indexOf(command));
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

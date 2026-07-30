@@ -5,10 +5,12 @@ Compact, low-noise rendering for Pi's built-in tool events, plus the
 
 ## What it changes
 
-- Collapsed tool calls render as one descriptive line, such as
-  `• read docs: extensions.md`.
+- Collapsed tool calls use a consistent `Category (detail)` shape, such as
+  `• Read (extensions.md)` and `• Bash (npm test)`. File actions show only the
+  final filename; search and shell actions keep a bounded intent string.
 - Consecutive `bash`, `read`, `grep`, `find`, and `ls` actions within one
-  execution batch collapse into a count summary. A new Thinking segment,
+  execution batch collapse into a natural-language count summary such as
+  `• Read 2 files, ran 1 bash`. A new Thinking segment,
   visible assistant content, user turn, error, or non-groupable tool starts a
   new batch.
 - A single action keeps its descriptive verb-and-target row.

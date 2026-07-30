@@ -33,8 +33,8 @@ export function formatGroupedSummary(toolNames: readonly string[]): ToolSummary 
 	const list = toolNames.filter((name) => name === "ls").length;
 	const clauses: string[] = [];
 
-	if (bash) clauses.push(`Ran ${countLabel(bash, "shell command")}`);
-	if (read) clauses.push(`${clauses.length ? "read" : "Read"} ${countLabel(read, "file")}`);
+	if (read) clauses.push(`Read ${countLabel(read, "file")}`);
+	if (bash) clauses.push(`${clauses.length ? "ran" : "Ran"} ${countLabel(bash, "bash", "bash")}`);
 	if (search) clauses.push(`${clauses.length ? "searched" : "Searched"} ${countLabel(search, "time")}`);
 	if (list) clauses.push(`${clauses.length ? "listed" : "Listed"} ${countLabel(list, "directory", "directories")}`);
 
@@ -42,7 +42,11 @@ export function formatGroupedSummary(toolNames: readonly string[]): ToolSummary 
 }
 
 function sameView(left: GroupView | undefined, right: GroupView | undefined): boolean {
-	return left?.hidden === right?.hidden && left?.summary?.verb === right?.summary?.verb;
+	return (
+		left?.hidden === right?.hidden &&
+		left?.summary?.verb === right?.summary?.verb &&
+		left?.summary?.detail === right?.summary?.detail
+	);
 }
 
 function messageRole(message: unknown): string | undefined {

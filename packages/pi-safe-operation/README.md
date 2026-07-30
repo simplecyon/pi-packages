@@ -35,6 +35,10 @@ Restart Pi after installation.
   and must be split.
 - Permanent deletion, destructive Git actions, privilege escalation, recursive
   permission changes, disk operations, and package removal require approval.
+- Approval dialogs lead with a plain-language action summary, the condition
+  under which approval is worthwhile, concrete risks, affected targets, and a
+  safer alternative. The complete command remains last as technical detail
+  instead of acting as the risk explanation.
 - Safety decisions constrain the intended effect, not merely one tool call.
   Agent guidance prohibits retrying, translating, decomposing, delegating, or
   recommending a substantially equivalent operation after it is blocked or

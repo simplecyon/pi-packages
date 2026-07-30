@@ -33,12 +33,12 @@ test("strips standard and extended background SGR without removing foreground", 
 
 test("collapsed call renders one compact event row", () => {
 	const component = new MinimalToolCallComponent(
-		{ verb: "read", detail: "docs: extensions.md" },
+		{ verb: "Read", detail: "extensions.md" },
 		new StaticComponent(["read /long/path/extensions.md", "", "content"]),
 		false,
 		theme,
 	);
-	assert.deepEqual(component.render(80), ["• read docs: extensions.md"]);
+	assert.deepEqual(component.render(80), ["• Read (extensions.md)"]);
 });
 
 test("action event text uses the terminal medium-weight approximation", () => {
@@ -51,18 +51,18 @@ test("action event text uses the terminal medium-weight approximation", () => {
 		},
 	} as Theme;
 	const component = new MinimalToolCallComponent(
-		{ verb: "read", detail: "docs: extensions.md" },
+		{ verb: "Read", detail: "extensions.md" },
 		undefined,
 		false,
 		weightedTheme,
 	);
 
-	assert.deepEqual(component.render(80), ["• <medium>read docs: extensions.md</medium>"]);
+	assert.deepEqual(component.render(80), ["• <medium>Read (extensions.md)</medium>"]);
 });
 
 test("expanded state restores an item hidden by its collapsed group", () => {
 	const component = new MinimalToolCallComponent(
-		{ verb: "read", detail: "README.md" },
+		{ verb: "Read", detail: "README.md" },
 		new StaticComponent(["read README.md", "", "file contents"]),
 		false,
 		theme,
@@ -71,35 +71,35 @@ test("expanded state restores an item hidden by its collapsed group", () => {
 	assert.deepEqual(component.render(80), []);
 
 	component.update(
-		{ verb: "read", detail: "README.md" },
+		{ verb: "Read", detail: "README.md" },
 		new StaticComponent(["read README.md", "", "file contents"]),
 		true,
 		theme,
 		{ getGroupView: () => ({ hidden: true }) },
 	);
-	assert.deepEqual(component.render(80), ["• read README.md", "  file contents"]);
+	assert.deepEqual(component.render(80), ["• Read (README.md)", "  file contents"]);
 });
 
 test("expanded call keeps summary and indents original body", () => {
 	const component = new MinimalToolCallComponent(
-		{ verb: "write", detail: "src/index.ts" },
+		{ verb: "Write", detail: "index.ts" },
 		new StaticComponent(["\x1b[44mwrite src/index.ts\x1b[49m", "", "const value = 1;", ""]),
 		true,
 		theme,
 	);
-	assert.deepEqual(component.render(80), ["• write src/index.ts", "  const value = 1;"]);
+	assert.deepEqual(component.render(80), ["• Write (index.ts)", "  const value = 1;"]);
 });
 
 test("edit calls can keep diff details visible while collapsed", () => {
 	const component = new MinimalToolCallComponent(
-		{ verb: "edit", detail: "src/index.ts" },
+		{ verb: "Edit", detail: "index.ts" },
 		new StaticComponent(["edit src/index.ts", "", " 1 -const oldValue = 1;", " 1 +const newValue = 2;"]),
 		false,
 		theme,
 		{ showInnerCollapsed: true },
 	);
 	assert.deepEqual(component.render(80), [
-		"• edit src/index.ts",
+		"• Edit (index.ts)",
 		"   1 -const oldValue = 1;",
 		"   1 +const newValue = 2;",
 	]);
@@ -107,7 +107,7 @@ test("edit calls can keep diff details visible while collapsed", () => {
 
 test("compact error status keeps priority over a long command", () => {
 	const component = new MinimalToolCallComponent(
-		{ verb: "bash", detail: "a very long command that should be truncated before the outcome" },
+		{ verb: "Bash", detail: "a very long command that should be truncated before the outcome" },
 		undefined,
 		false,
 		theme,
@@ -140,7 +140,7 @@ test("result preserves an explicitly allowed compact diff background", () => {
 
 test("rendered rows respect the requested width", () => {
 	const component = new MinimalToolCallComponent(
-		{ verb: "bash", detail: "a very long command that must be clipped" },
+		{ verb: "Bash", detail: "a very long command that must be clipped" },
 		undefined,
 		false,
 		theme,
