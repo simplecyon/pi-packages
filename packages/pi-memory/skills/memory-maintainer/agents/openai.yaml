@@ -1,0 +1,4 @@
+interface:
+  display_name: "Memory Maintainer"
+  short_description: "Safely maintain scoped project memory files"
+  default_prompt: "Use $memory-maintainer to consolidate this durable project context into the appropriate memory scope."

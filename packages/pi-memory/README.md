@@ -1,11 +1,12 @@
 # @simplecyon/pi-memory
 
-Package-only, scoped `MEMORY.md` injection for Pi.
+Package-only, scoped project-memory injection and maintenance routing for Pi.
 
 The extension keeps stable memory in the system-prompt prefix, progressively
 discloses directory-specific memory as the agent works, and prevents the first
 mutation in an unread scope from running before the model has received that
-scope's memory.
+scope's memory. It also retrieves relevant `.memory/*.md` topic files from user
+input and bundles the `memory-maintainer` skill.
 
 ## Memory model
 
@@ -36,6 +37,44 @@ same snapshot do not add duplicate events.
   the agent.
 - A newly disclosed scope renders as `✦ 读取了 <scope> 记忆`; `Ctrl+O` reveals
   the injected memory content.
+
+### Discrete memory recall
+
+- The `input` hook captures ordinary interactive and RPC user prompts without
+  transforming their text.
+- Before the agent starts, a deterministic local matcher searches `.memory`
+  directories on the project-root-to-cwd scope chain.
+- Filename, heading, indexed `triggers`, indexed `use when`, and body matches
+  receive separate weights. Indexed triggers are strongest.
+- Generic turns and slash commands are skipped. Automatic recall requires a
+  minimum score; multi-token queries must match at least two distinct tokens.
+  It selects at most two files and uses an 8,000-character budget.
+- Files larger than 64 KiB, symlinks, paths outside the owning `.memory`
+  directory, and candidates after the 200-file limit are ignored.
+- A recall renders as `✦ 召回了 N 份离散记忆`; `Ctrl+O` shows paths, scores,
+  match reasons, and injected content.
+- `memory_search` provides explicit bounded search for the agent without
+  injecting the results automatically.
+
+An owning `MEMORY.md` can improve recall precision with an index entry:
+
+```md
+- Automation and sync: see `.memory/automation-git-sync.md`
+  - triggers: scheduled job stuck, git sync, 自动化, 时区
+  - use when: a scheduled report fails or repository synchronization breaks
+```
+
+### Memory maintenance
+
+The package exposes the `memory-maintainer` skill. Its metadata routes only
+when the user explicitly asks to remember, persist, update, consolidate, move,
+delete, or otherwise maintain project memory. Projects that need a mandatory
+policy can add a short append-system invariant requiring this skill before
+memory writes; the full workflow remains progressively disclosed in the skill.
+
+The skill uses normal read/edit/write tools, keeps topic files indexed from the
+nearest `MEMORY.md`, and requires explicit confirmation for deletion,
+overwrite, and MOVE. The extension does not provide a privileged memory writer.
 
 ### Refresh and compaction
 
@@ -75,8 +114,16 @@ The complete suite remains available as
 | --- | --- |
 | `/memory` | Show current memory state |
 | `/memory refresh` | Mark memory for refresh |
+| `/memory recall <query>` | Explicitly retrieve and inject discrete memory |
+| `/memory explain` | Explain the most recent discrete-memory match |
 | `/memory off` | Disable injection for the current session |
 | `/memory on` | Re-enable injection |
+
+Model tool:
+
+```text
+memory_search(query, limit?)
+```
 
 Disable injection at process startup:
 

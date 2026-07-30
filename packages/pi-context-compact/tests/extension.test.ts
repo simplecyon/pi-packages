@@ -20,6 +20,7 @@ test("registers compact_search and provides custom compaction after durable stor
 	const tools: ToolDefinition[] = [];
 	const busHandlers = new Map<string, Array<(data: unknown) => void>>();
 	const notifications: Array<{ message: string; level: string }> = [];
+	const sentUserMessages: Array<{ content: unknown; options: unknown }> = [];
 	let activeTools: string[] = [];
 	const pi = {
 		on(name: string, handler: (...args: any[]) => unknown) {
@@ -32,6 +33,10 @@ test("registers compact_search and provides custom compaction after durable stor
 		getActiveTools: () => [...activeTools],
 		setActiveTools(names: string[]) {
 			activeTools = [...names];
+		},
+		sendUserMessage(content: unknown, options: unknown) {
+			sentUserMessages.push({ content, options });
+			return Promise.resolve();
 		},
 		events: {
 			on(channel: string, handler: (data: unknown) => void) {
@@ -85,6 +90,7 @@ test("registers compact_search and provides custom compaction after durable stor
 			cwd: "/project",
 			sessionManager: { getSessionFile: () => "/sessions/a.jsonl", getBranch: () => [] },
 			hasUI: true,
+			isIdle: () => true,
 			ui: {
 				notify(message: string, level: string) {
 					notifications.push({ message, level });
@@ -132,6 +138,44 @@ test("registers compact_search and provides custom compaction after durable stor
 			ctx,
 		);
 		assert.equal(notifications.length, 1);
+
+		// Manual and idle compactions must not queue an auto-continue.
+		assert.equal(sentUserMessages.length, 0);
+
+		// Threshold compaction mid-run queues a follow-up so Pi continues the task.
+		const activeCtx = { ...ctx, isIdle: () => false } as unknown as ExtensionContext;
+		await compacted(
+			{
+				type: "session_compact",
+				fromExtension: true,
+				reason: "threshold",
+				willRetry: false,
+				compactionEntry: {
+					tokensBefore: result.compaction.tokensBefore,
+					details: result.compaction.details,
+				},
+			},
+			activeCtx,
+		);
+		assert.equal(sentUserMessages.length, 1);
+		assert.match(String(sentUserMessages[0]?.content), /Continue the unfinished task/);
+		assert.deepEqual(sentUserMessages[0]?.options, { deliverAs: "followUp" });
+
+		// Threshold compaction while idle (pre-prompt) must not queue a follow-up.
+		await compacted(
+			{
+				type: "session_compact",
+				fromExtension: true,
+				reason: "threshold",
+				willRetry: false,
+				compactionEntry: {
+					tokensBefore: result.compaction.tokensBefore,
+					details: result.compaction.details,
+				},
+			},
+			ctx,
+		);
+		assert.equal(sentUserMessages.length, 1);
 
 		const searchTool = tools.find((tool) => tool.name === "compact_search");
 		assert.ok(searchTool);

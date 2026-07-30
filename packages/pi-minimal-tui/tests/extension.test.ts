@@ -315,7 +315,12 @@ test("a completed edit uses the compact diff while collapsed", async () => {
 			theme,
 			{ ...context, lastComponent: undefined } as any,
 		);
-		assert.deepEqual(result?.render(100).map(plain), ["  -1 const value = 1;", "  +1 const value = 2;"]);
+		const rendered = result?.render(100) ?? [];
+		assert.deepEqual(rendered.map((line) => plain(line).trimEnd()), [
+			"  -1 const value = 1;",
+			"  +1 const value = 2;",
+		]);
+		assert.ok(rendered.every((line) => plain(line).length === 100));
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}

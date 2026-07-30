@@ -1,5 +1,6 @@
 import { getLanguageFromPath, highlightCode, type Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 export type CompactDiffLineKind = "added" | "removed" | "context" | "omission";
 
@@ -89,17 +90,22 @@ function semanticBackground(
 	theme: Theme,
 	color: "toolDiffAdded" | "toolDiffRemoved",
 	text: string,
+	width?: number,
 ): string {
+	const fitted =
+		width === undefined
+			? text
+			: truncateToWidth(text, width, "") + " ".repeat(Math.max(0, width - visibleWidth(text)));
 	if (
 		typeof theme.getBgAnsi !== "function" ||
 		typeof theme.getFgAnsi !== "function" ||
 		typeof theme.getColorMode !== "function"
 	) {
-		return theme.bg("selectedBg", text);
+		return theme.bg("selectedBg", fitted);
 	}
 	const base = rgbFromAnsi(theme.getBgAnsi("selectedBg"));
 	const tint = rgbFromAnsi(theme.getFgAnsi(color));
-	if (!base || !tint) return theme.bg("selectedBg", text);
+	if (!base || !tint) return theme.bg("selectedBg", fitted);
 
 	const light = isLightBackground(base);
 	const neutral = light ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 };
@@ -109,7 +115,7 @@ function semanticBackground(
 		theme.getColorMode() === "truecolor"
 			? `\x1b[48;2;${background.r};${background.g};${background.b}m`
 			: `\x1b[48;5;${rgbToAnsi256(background)}m`;
-	return `${ansi}${text}\x1b[49m`;
+	return `${ansi}${fitted}\x1b[49m`;
 }
 
 function splitDisplayRow(text: string): { gutter: string; code: string } | undefined {
@@ -175,18 +181,18 @@ export function compactDiffLines(diffText: string, contextLines = 1): CompactDif
 	return compacted;
 }
 
-function colorLine(line: CompactDiffLine, theme: Theme, filePath: string | undefined): string {
+function colorLine(line: CompactDiffLine, theme: Theme, filePath: string | undefined, width?: number): string {
 	const row = splitDisplayRow(line.text);
 	switch (line.kind) {
 		case "added": {
-			if (!row) return semanticBackground(theme, "toolDiffAdded", theme.fg("text", line.text));
+			if (!row) return semanticBackground(theme, "toolDiffAdded", theme.fg("text", line.text), width);
 			const content = theme.fg("toolDiffAdded", row.gutter) + renderCode(row.code, filePath, theme);
-			return semanticBackground(theme, "toolDiffAdded", content);
+			return semanticBackground(theme, "toolDiffAdded", content, width);
 		}
 		case "removed": {
-			if (!row) return semanticBackground(theme, "toolDiffRemoved", theme.fg("text", line.text));
+			if (!row) return semanticBackground(theme, "toolDiffRemoved", theme.fg("text", line.text), width);
 			const content = theme.fg("toolDiffRemoved", row.gutter) + renderCode(row.code, filePath, theme);
-			return semanticBackground(theme, "toolDiffRemoved", content);
+			return semanticBackground(theme, "toolDiffRemoved", content, width);
 		}
 		case "omission":
 			return theme.fg("dim", line.text);
@@ -214,8 +220,8 @@ export class CompactDiffComponent implements Component {
 		this.filePath = filePath;
 	}
 
-	render(): string[] {
-		return compactDiffLines(this.diffText).map((line) => colorLine(line, this.theme, this.filePath));
+	render(width?: number): string[] {
+		return compactDiffLines(this.diffText).map((line) => colorLine(line, this.theme, this.filePath, width));
 	}
 
 	invalidate(): void {}

@@ -133,8 +133,8 @@ test("result preserves an explicitly allowed compact diff background", () => {
 	const component = new MinimalToolResultComponent(inner, true, true);
 
 	assert.deepEqual(component.render(80), [
-		`  ${background}-1 old${reset}`,
-		`  ${background}+1 new${reset}`,
+		`${background}  -1 old${reset}`,
+		`${background}  +1 new${reset}`,
 	]);
 });
 

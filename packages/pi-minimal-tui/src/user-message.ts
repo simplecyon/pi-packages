@@ -1,4 +1,5 @@
 import { UserMessageComponent } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const ANSI_SOURCE = String.raw`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))`;
@@ -8,6 +9,7 @@ const PATCH_MARKER = Symbol.for("@simplecyon/pi-minimal-tui/compact-user-message
 const DIM_ARROW = "\x1b[2m>\x1b[22m ";
 const MEDIUM_TEXT_START = "\x1b[1m";
 const MEDIUM_TEXT_END = "\x1b[22m";
+const UPPER_QUARTER_BLOCK = "\u{1fb82}";
 
 interface PatchableUserMessagePrototype {
 	render(width: number): string[];
@@ -32,6 +34,21 @@ function compactTopPadding(lines: string[]): string[] {
 	return compacted;
 }
 
+function quarterHeightBottomPadding(lines: string[], width: number): string[] {
+	const compacted = [...lines];
+	const lastIndex = compacted.length - 1;
+	const last = compacted[lastIndex];
+	if (last === undefined || !visuallyBlank(last)) return compacted;
+
+	const strip = last
+		.replace(/\x1b\[48;/g, "\x1b[38;")
+		.replace(/\x1b\[49m/g, "\x1b[39m")
+		.replace(/ /g, UPPER_QUARTER_BLOCK);
+	const fill = UPPER_QUARTER_BLOCK.repeat(Math.max(0, width - visibleWidth(strip)));
+	compacted[lastIndex] = strip.replace(/\x1b\[39m$/, `${fill}\x1b[39m`);
+	return compacted;
+}
+
 function styleUserMessageLine(line: string): string {
 	if (visuallyBlank(line)) return line;
 
@@ -49,7 +66,10 @@ export function installCompactUserMessageRendering(): void {
 
 	const originalRender = prototype.render;
 	prototype.render = function renderCompactUserMessage(width: number): string[] {
-		const lines = compactTopPadding(originalRender.call(this, Math.max(1, width - 1)));
+		const lines = quarterHeightBottomPadding(
+			compactTopPadding(originalRender.call(this, Math.max(1, width - 1))),
+			width,
+		);
 		return lines.map(styleUserMessageLine);
 	};
 	prototype[PATCH_MARKER] = true;

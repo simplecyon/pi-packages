@@ -8,7 +8,7 @@ const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 const ANSI_PATTERN = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g;
 
-test("user message highlight keeps one bottom padding row", () => {
+test("user message highlight uses a quarter-height bottom strip", () => {
 	initTheme("dark");
 	installCompactUserMessageRendering();
 	installCompactUserMessageRendering();
@@ -25,5 +25,7 @@ test("user message highlight keeps one bottom padding row", () => {
 	assert.equal(lines[0]?.replace(ANSI_PATTERN, "").trimEnd(), "> compact message");
 	assert.ok(lines[1]?.includes(OSC133_ZONE_END));
 	assert.ok(lines[1]?.includes(OSC133_ZONE_FINAL));
-	assert.equal(lines[1]?.replace(ANSI_PATTERN, "").trim(), "");
+	assert.equal(lines[1]?.replace(ANSI_PATTERN, ""), "\u{1fb82}".repeat(48));
+	assert.ok(!lines[1]?.includes("\x1b[48;"));
+	assert.ok(lines[1]?.includes("\x1b[38;"));
 });

@@ -26,9 +26,10 @@ const expectedPackages = new Map([
 test("aggregate manifest points to existing package resources", () => {
 	const resources = [
 		...(manifest.pi?.extensions ?? []),
+		...(manifest.pi?.skills ?? []),
 		...(manifest.pi?.themes ?? []),
 	];
-	assert.equal(resources.length, 12);
+	assert.equal(resources.length, 13);
 	for (const resource of resources) {
 		assert.equal(
 			fs.existsSync(path.resolve(root, resource)),
@@ -77,6 +78,7 @@ test("every workspace is independently publishable under @simplecyon", () => {
 
 		for (const resource of [
 			...(packageManifest.pi?.extensions ?? []),
+			...(packageManifest.pi?.skills ?? []),
 			...(packageManifest.pi?.themes ?? []),
 		]) {
 			assert.equal(

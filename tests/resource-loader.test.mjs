@@ -11,17 +11,17 @@ import {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workspaces = [
-	["pi-ask-user-question", 1, 0],
-	["pi-context-artifacts", 1, 0],
-	["pi-context-compact", 1, 0],
-	["pi-context-engine", 1, 0],
-	["pi-context-inspector", 1, 0],
-	["pi-memory", 1, 0],
-	["pi-minimal-tui", 1, 1],
-	["pi-safe-operation", 1, 0],
-	["pi-session-tasks", 1, 0],
-	["pi-skill-telemetry", 1, 0],
-	["pi-token-roi", 1, 0],
+	["pi-ask-user-question", 1, 0, 0],
+	["pi-context-artifacts", 1, 0, 0],
+	["pi-context-compact", 1, 0, 0],
+	["pi-context-engine", 1, 0, 0],
+	["pi-context-inspector", 1, 0, 0],
+	["pi-memory", 1, 0, 1],
+	["pi-minimal-tui", 1, 1, 0],
+	["pi-safe-operation", 1, 0, 0],
+	["pi-session-tasks", 1, 0, 0],
+	["pi-skill-telemetry", 1, 0, 0],
+	["pi-token-roi", 1, 0, 0],
 ];
 
 async function loadPackage(packageRoot, agentDir) {
@@ -33,12 +33,25 @@ async function loadPackage(packageRoot, agentDir) {
 		cwd: root,
 		agentDir,
 		settingsManager,
-		noSkills: true,
+		noSkills: false,
 		noPromptTemplates: true,
 		noContextFiles: true,
 	});
 	await loader.reload();
 	return loader;
+}
+
+function skillsOwnedBy(packageRoot, skills) {
+	const owner = path.resolve(packageRoot);
+	return skills.filter((skill) => {
+		const relative = path.relative(owner, path.resolve(skill.filePath));
+		return (
+			relative === "" ||
+			(!relative.startsWith(`..${path.sep}`) &&
+				relative !== ".." &&
+				!path.isAbsolute(relative))
+		);
+	});
 }
 
 test("Pi loads the aggregate package without duplicate or invalid resources", async (t) => {
@@ -50,8 +63,10 @@ test("Pi loads the aggregate package without duplicate or invalid resources", as
 	const loader = await loadPackage(root, agentDir);
 
 	const extensionResult = loader.getExtensions();
+	const skillResult = loader.getSkills();
 	const themeResult = loader.getThemes();
 	assert.deepEqual(extensionResult.errors, []);
+	assert.deepEqual(skillResult.diagnostics, []);
 	assert.deepEqual(themeResult.diagnostics, []);
 	assert.equal(extensionResult.extensions.length, 11);
 	assert.equal(
@@ -62,10 +77,17 @@ test("Pi loads the aggregate package without duplicate or invalid resources", as
 		themeResult.themes.map((theme) => theme.name),
 		["cyon-minimal-dark"],
 	);
+	assert.deepEqual(
+		skillsOwnedBy(root, skillResult.skills).map((skill) => skill.name),
+		["memory-maintainer"],
+	);
 });
 
 test("Pi loads every extension workspace as an independent package", async (t) => {
-	for (const [directory, expectedExtensions, expectedThemes] of workspaces) {
+	for (
+		const [directory, expectedExtensions, expectedThemes, expectedSkills] of
+		workspaces
+	) {
 		await t.test(directory, async (t) => {
 			const agentDir = fs.mkdtempSync(
 				path.join(os.tmpdir(), `pi-package-${directory}-`),
@@ -75,12 +97,18 @@ test("Pi loads every extension workspace as an independent package", async (t) =
 			const packageRoot = path.join(root, "packages", directory);
 			const loader = await loadPackage(packageRoot, agentDir);
 			const extensionResult = loader.getExtensions();
+			const skillResult = loader.getSkills();
 			const themeResult = loader.getThemes();
 
 			assert.deepEqual(extensionResult.errors, []);
+			assert.deepEqual(skillResult.diagnostics, []);
 			assert.deepEqual(themeResult.diagnostics, []);
 			assert.equal(extensionResult.extensions.length, expectedExtensions);
 			assert.equal(themeResult.themes.length, expectedThemes);
+			assert.equal(
+				skillsOwnedBy(packageRoot, skillResult.skills).length,
+				expectedSkills,
+			);
 		});
 	}
 });

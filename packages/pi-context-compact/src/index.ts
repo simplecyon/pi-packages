@@ -20,6 +20,14 @@ import {
 
 const CONTEXT_ENGINE_COMPACT_SEARCH = "simplecyon:context-engine:compact-search";
 
+const AUTO_CONTINUE_PROMPT =
+	"Context compaction finished. Continue the unfinished task from the checkpoint above; do not repeat completed work.";
+
+function autoContinueDisabled(): boolean {
+	const value = process.env.PI_CONTEXT_COMPACT_AUTO_CONTINUE?.trim().toLowerCase();
+	return value === "off" || value === "0" || value === "false";
+}
+
 interface ContextEngineCompactSearchRequest {
 	query?: unknown;
 	limit?: unknown;
@@ -204,6 +212,15 @@ export default function contextCompactExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_compact", (event: SessionCompactEvent, ctx) => {
 		try {
+			// Threshold compaction fires at agent_end, after Pi has already decided
+			// the turn is over. Queueing a follow-up here makes Pi's post-compaction
+			// hasQueuedMessages() check continue the run instead of waiting for the
+			// user. Skipped while idle (pre-prompt compaction), where the user's own
+			// prompt already drives the next turn, and for manual/overflow reasons,
+			// which either are user-initiated or retry on their own.
+			if (event.reason === "threshold" && !ctx.isIdle() && !autoContinueDisabled()) {
+				pi.sendUserMessage(AUTO_CONTINUE_PROMPT, { deliverAs: "followUp" });
+			}
 			const details = event.compactionEntry.details as Partial<ContextCompactDetails> | undefined;
 			if (details?.owner !== CHECKPOINT_OWNER) return;
 			setSearchActive(true);

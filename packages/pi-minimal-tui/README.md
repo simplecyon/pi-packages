@@ -22,7 +22,8 @@ Compact, low-noise rendering for Pi's built-in tool events, plus the
   theme-adaptive green/red backgrounds on added and removed rows. Dark themes
   use low-luminance tints; light themes use pale high-luminance tints. Only the
   gutter keeps the semantic red/green foreground; code uses Pi's syntax
-  highlighter selected from the edited file extension.
+  highlighter selected from the edited file extension. Each changed-row tint
+  fills the complete rendered row.
 - `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls` use
   background-free self-rendered shells.
 - When `@simplecyon/pi-safe-operation` is loaded in the same Pi runtime, the
@@ -34,9 +35,11 @@ Compact, low-noise rendering for Pi's built-in tool events, plus the
   diffs.
 - `cyon-minimal-dark` gives user messages a subtle cool-gray highlight while
   keeping tool and custom-message surfaces quiet. User-message highlights omit
-  Pi's default blank row above the content while retaining one bottom padding
-  row, add a dim `> ` gutter, and use the same medium-weight approximation as
-  events. Primary text is pure white for stronger dark-theme contrast.
+  Pi's default blank row above the content and replace the full bottom padding
+  row with a quarter-height strip, making the highlight approximately 1.25×
+  the text height. They also add a dim `> ` gutter and use the same
+  medium-weight approximation as events. Primary text is pure white for
+  stronger dark-theme contrast.
 
 `write` is summarized as a file operation rather than shown as an invented
 diff: Pi's write result does not contain the previous file content.

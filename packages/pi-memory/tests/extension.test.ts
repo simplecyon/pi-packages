@@ -28,6 +28,7 @@ function createHarness(activeMessages: unknown[]) {
 	const entries: Array<{ customType: string; data: unknown }> = [];
 	const entryRenderers = new Map<string, (...args: any[]) => unknown>();
 	const messageRenderers = new Map<string, (...args: any[]) => unknown>();
+	const tools = new Map<string, any>();
 	const pi = {
 		on(name: string, handler: (...args: any[]) => unknown) {
 			const list = handlers.get(name) ?? [];
@@ -42,6 +43,9 @@ function createHarness(activeMessages: unknown[]) {
 		},
 		registerMessageRenderer(customType: string, renderer: (...args: any[]) => unknown) {
 			messageRenderers.set(customType, renderer);
+		},
+		registerTool(tool: { name: string }) {
+			tools.set(tool.name, tool);
 		},
 		appendEntry(customType: string, data: unknown) {
 			entries.push({ customType, data });
@@ -67,6 +71,7 @@ function createHarness(activeMessages: unknown[]) {
 		entries,
 		entryRenderers,
 		messageRenderers,
+		tools,
 	};
 }
 
@@ -387,6 +392,137 @@ test("renders base and scoped memory reads as independent TUI events", async () 
 			scopeComponent.render(80).map((line) => line.trimEnd()),
 			["✦ 读取了 pi 记忆"],
 		);
+	} finally {
+		if (oldAgentDir === undefined) delete process.env.PI_MEMORY_AGENT_DIR;
+		else process.env.PI_MEMORY_AGENT_DIR = oldAgentDir;
+		fs.rmSync(root, { recursive: true, force: true });
+		fs.rmSync(agent, { recursive: true, force: true });
+	}
+});
+
+test("recalls indexed discrete memory from user input with routing, tools, and deduplication", async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-memory-auto-recall-"));
+	const agent = fs.mkdtempSync(path.join(os.tmpdir(), "pi-memory-agent-"));
+	const oldAgentDir = process.env.PI_MEMORY_AGENT_DIR;
+	process.env.PI_MEMORY_AGENT_DIR = agent;
+	try {
+		fs.mkdirSync(path.join(root, ".pi"));
+		fs.writeFileSync(path.join(root, ".pi", "settings.json"), "{}");
+		fs.mkdirSync(path.join(root, ".memory"));
+		fs.writeFileSync(
+			path.join(root, "MEMORY.md"),
+			[
+				"# Root",
+				"- Pi memory runtime: see `.memory/pi-memory-runtime.md`",
+				"  - triggers: pi memory, memory injection, 关键词召回",
+				"  - use when: changing the input hook or discrete memory recall",
+			].join("\n"),
+		);
+		fs.writeFileSync(
+			path.join(root, ".memory", "pi-memory-runtime.md"),
+			"# Pi Memory Runtime\n\nUse the input hook for deterministic recall.",
+		);
+
+		const notifications: string[] = [];
+		const harness = createHarness([]);
+		const ctx = {
+			cwd: root,
+			sessionManager: {
+				buildContextEntries: () => [],
+				getBranch: () => [],
+			},
+			ui: { notify(message: string) { notifications.push(message); } },
+		} as unknown as ExtensionContext;
+		await fire(harness.handlers, "session_start", { reason: "startup" }, ctx);
+		await fire(
+			harness.handlers,
+			"input",
+			{
+				type: "input",
+				text: "给 pi memory 增加关键词召回",
+				source: "interactive",
+			},
+			ctx,
+		);
+		const before = (await fire(
+			harness.handlers,
+			"before_agent_start",
+			{
+				type: "before_agent_start",
+				prompt: "给 pi memory 增加关键词召回",
+				systemPrompt: "SYSTEM",
+				systemPromptOptions: {
+					skills: [{ name: "memory-maintainer" }],
+				},
+			},
+			ctx,
+		)) as { systemPrompt: string };
+		assert.match(before.systemPrompt, /<memory_recall/);
+		assert.match(before.systemPrompt, /Pi Memory Runtime/);
+		assert.equal(
+			harness.entries.filter(
+				(entry) => entry.customType === "memory-recall-event",
+			).length,
+			1,
+		);
+
+		await fire(
+			harness.handlers,
+			"before_agent_start",
+			{
+				type: "before_agent_start",
+				prompt: "retry",
+				systemPrompt: "SYSTEM",
+				systemPromptOptions: {
+					skills: [{ name: "memory-maintainer" }],
+				},
+			},
+			ctx,
+		);
+		assert.equal(
+			harness.entries.filter(
+				(entry) => entry.customType === "memory-recall-event",
+			).length,
+			1,
+		);
+
+		const search = harness.tools.get("memory_search");
+		assert.ok(search);
+		const result = await search.execute(
+			"search-memory",
+			{ query: "memory injection", limit: 3 },
+			undefined,
+			undefined,
+			ctx,
+		);
+		assert.match(result.content[0].text, /\.memory\/pi-memory-runtime\.md/);
+		assert.equal(result.details.hits, 1);
+
+		await harness.commands.get("memory")?.("recall memory injection", ctx);
+		assert.equal(harness.sent.at(-1)?.message.customType, "cyon-discrete-memory");
+		await harness.commands.get("memory")?.("explain", ctx);
+		assert.match(notifications.at(-1) ?? "", /pi-memory-runtime\.md/);
+
+		await fire(
+			harness.handlers,
+			"input",
+			{ type: "input", text: "继续", source: "interactive" },
+			ctx,
+		);
+		const generic = (await fire(
+			harness.handlers,
+			"before_agent_start",
+			{
+				type: "before_agent_start",
+				prompt: "继续",
+				systemPrompt: "SYSTEM",
+				systemPromptOptions: {
+					skills: [{ name: "memory-maintainer" }],
+				},
+			},
+			ctx,
+		)) as { systemPrompt: string };
+		assert.doesNotMatch(generic.systemPrompt, /<memory_recall/);
 	} finally {
 		if (oldAgentDir === undefined) delete process.env.PI_MEMORY_AGENT_DIR;
 		else process.env.PI_MEMORY_AGENT_DIR = oldAgentDir;

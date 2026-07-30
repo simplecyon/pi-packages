@@ -21,6 +21,10 @@ the `compact_search` tool instead of being replayed into every model request.
 - Falls back to Pi's native compaction if durable storage fails.
 - Shows a compact TUI completion notice with the pre-compaction token count and
   archived message count.
+- After a threshold-triggered compaction at turn end, queues a follow-up message
+  so Pi continues the unfinished task instead of waiting for the user. Manual
+  `/compact`, overflow recovery (Pi retries on its own), and pre-prompt
+  compaction are excluded. Disable with `PI_CONTEXT_COMPACT_AUTO_CONTINUE=off`.
 
 ## Install
 

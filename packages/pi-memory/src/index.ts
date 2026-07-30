@@ -15,6 +15,7 @@ import {
 	isToolCallEventType,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
 import {
 	type BaseSnapshot,
 	type MemoryFile,
@@ -26,14 +27,40 @@ import {
 	looksMutatingBash,
 	resolveToolPath,
 } from "./memory.ts";
+import {
+	discoverDiscreteMemories,
+	formatRecallSearch,
+	type RecallSelection,
+	searchDiscreteMemories,
+	selectRecall,
+	shouldAutoRecall,
+} from "./recall.ts";
 
 const DISABLE_ENV = "PI_NO_MEMORY_INJECTION";
 const AGENT_DIR_ENV = "PI_MEMORY_AGENT_DIR";
 const CUSTOM_TYPE = "cyon-scope-memory";
+const RECALL_CUSTOM_TYPE = "cyon-discrete-memory";
 const MEMORY_READ_ENTRY = "memory-read-event";
+const RECALL_READ_ENTRY = "memory-recall-event";
 const BASE_EVENT = "memory-injection:base-loaded";
 const CAPABILITY_AVAILABLE = "cyon:memory:available";
 const CAPABILITY_DISCOVER = "cyon:memory:discover";
+const SEARCH_TOOL = "memory_search";
+
+const MemorySearchSchema = Type.Object(
+	{
+		query: Type.String({
+			minLength: 1,
+			maxLength: 500,
+			description:
+				"Specific terms used to search scoped .memory Markdown files",
+		}),
+		limit: Type.Optional(
+			Type.Integer({ minimum: 1, maximum: 10, default: 5 }),
+		),
+	},
+	{ additionalProperties: false },
+);
 
 interface ScopeMessageDetails {
 	scopeDir: string;
@@ -51,6 +78,23 @@ interface MemoryReadEntry {
 	signature: string;
 	labels: string[];
 	recordedAt: string;
+}
+
+interface RecallReadEntry {
+	signature: string;
+	query: string;
+	files: Array<{
+		path: string;
+		score: number;
+		reasons: string[];
+	}>;
+	recordedAt: string;
+}
+
+interface RecallMessageDetails {
+	query: string;
+	signature: string;
+	files: RecallReadEntry["files"];
 }
 
 function formatScopeMessage(memory: MemoryFile, cwd: string): string {
@@ -76,6 +120,27 @@ function formatBase(snapshot: BaseSnapshot): string {
 			return `<file path="${file.path}" scope="${file.scopeDir}"${truncation}>\n${file.content}\n</file>`;
 		})
 		.join("\n");
+}
+
+function recallDetails(selection: RecallSelection): RecallMessageDetails {
+	return {
+		query: selection.query,
+		signature: selection.signature,
+		files: selection.hits.map((hit) => ({
+			path: hit.memory.relativePath,
+			score: hit.score,
+			reasons: hit.reasons,
+		})),
+	};
+}
+
+function recallSummary(selection: RecallSelection): string {
+	return selection.hits
+		.map(
+			(hit) =>
+				`${hit.memory.relativePath} (${hit.score}: ${hit.reasons.join(", ")})`,
+		)
+		.join(" · ");
 }
 
 function detailsFromMessage(message: unknown): ScopeMessageDetails | null {
@@ -145,8 +210,12 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 	let currentTurn = 0;
 	let epoch = 0;
 	let enabled = process.env[DISABLE_ENV] !== "1";
+	let pendingRecallQuery: string | null = null;
+	let activeRecall: RecallSelection | null = null;
+	let lastRecall: RecallSelection | null = null;
 	const scopes = new Map<string, ScopeState>();
 	const announcedBaseSignatures = new Set<string>();
+	const announcedRecallSignatures = new Set<string>();
 
 	const getConfiguredAgentDir = () => process.env[AGENT_DIR_ENV] || getAgentDir();
 
@@ -161,6 +230,7 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 
 	function rebuildReadAnnouncements(ctx: ExtensionContext): void {
 		announcedBaseSignatures.clear();
+		announcedRecallSignatures.clear();
 		const manager = ctx.sessionManager as unknown as {
 			getBranch?: () => unknown[];
 		};
@@ -177,6 +247,13 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 			) {
 				announcedBaseSignatures.add(entry.data.signature);
 			}
+			if (
+				entry.type === "custom" &&
+				entry.customType === RECALL_READ_ENTRY &&
+				typeof entry.data?.signature === "string"
+			) {
+				announcedRecallSignatures.add(entry.data.signature);
+			}
 		}
 	}
 
@@ -188,6 +265,16 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 			recordedAt: new Date().toISOString(),
 		});
 		announcedBaseSignatures.add(snapshot.signature);
+	}
+
+	function announceRecall(selection: RecallSelection): void {
+		if (announcedRecallSignatures.has(selection.signature)) return;
+		const details = recallDetails(selection);
+		pi.appendEntry<RecallReadEntry>(RECALL_READ_ENTRY, {
+			...details,
+			recordedAt: new Date().toISOString(),
+		});
+		announcedRecallSignatures.add(selection.signature);
 	}
 
 	function emitBase(): void {
@@ -210,6 +297,22 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 		snapshot = next;
 		emitBase();
 		return changed;
+	}
+
+	function buildRecall(
+		query: string,
+		cwd: string,
+		options: { automatic: boolean; limit?: number } = { automatic: true },
+	): RecallSelection | null {
+		const catalog = discoverDiscreteMemories(cwd, snapshot.projectRoot);
+		const hits = searchDiscreteMemories(catalog, query, {
+			limit: options.automatic ? 5 : options.limit ?? 5,
+			minScore: options.automatic ? undefined : 1,
+			minMatchedTokens: options.automatic ? 2 : 1,
+		});
+		return selectRecall(query, hits, {
+			limit: options.automatic ? 2 : options.limit ?? 5,
+		});
 	}
 
 	function rebuildResidency(ctx: ExtensionContext): void {
@@ -321,6 +424,34 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 		},
 	);
 
+	pi.registerEntryRenderer<RecallReadEntry>(
+		RECALL_READ_ENTRY,
+		(entry, { expanded }, theme) => {
+			const data = entry.data;
+			const count = data?.files.length ?? 0;
+			const line = [
+				theme.fg("accent", "✦"),
+				theme.fg("muted", "召回了"),
+				theme.fg("accent", theme.bold(`${count} 份`)),
+				theme.fg("muted", "离散记忆"),
+			].join(" ");
+			const details =
+				expanded && data
+					? `\n${theme.fg("dim", `${data.query}\n${data.files
+							.map(
+								(file) =>
+									`${file.path} · ${file.score} · ${file.reasons.join(", ")}`,
+							)
+							.join("\n")}`)}`
+					: "";
+			const text = line + details;
+			return {
+				render: () => text.split("\n"),
+				invalidate: () => {},
+			};
+		},
+	);
+
 	pi.registerMessageRenderer<ScopeMessageDetails>(
 		CUSTOM_TYPE,
 		(message, { expanded }, theme) => {
@@ -344,12 +475,79 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 		},
 	);
 
+	pi.registerMessageRenderer<RecallMessageDetails>(
+		RECALL_CUSTOM_TYPE,
+		(message, { expanded }, theme) => {
+			const files = message.details?.files ?? [];
+			const header = [
+				theme.fg("accent", "✦"),
+				theme.fg("muted", "召回了"),
+				theme.fg("accent", theme.bold(`${files.length} 份`)),
+				theme.fg("muted", "离散记忆"),
+			].join(" ");
+			if (!expanded) return new Text(header, 0, 0);
+			const content =
+				typeof message.content === "string"
+					? message.content
+					: message.content
+							.map((block) => ("text" in block ? block.text : ""))
+							.join("\n");
+			return new Text(`${header}\n${theme.fg("toolOutput", content)}`, 0, 0);
+		},
+	);
+
+	pi.registerTool({
+		name: SEARCH_TOOL,
+		label: "Search Project Memory",
+		description:
+			"Search the current project's scoped .memory Markdown files. Use for focused recall or to check existing coverage before maintaining project memory.",
+		parameters: MemorySearchSchema,
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			if (signal?.aborted) {
+				return {
+					content: [
+						{ type: "text" as const, text: "Memory search cancelled." },
+					],
+					details: { hits: 0 },
+				};
+			}
+			refreshBase(ctx.cwd);
+			const catalog = discoverDiscreteMemories(ctx.cwd, snapshot.projectRoot);
+			const hits = searchDiscreteMemories(catalog, params.query, {
+				limit: params.limit ?? 5,
+				minScore: 1,
+				minMatchedTokens: 1,
+			});
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: formatRecallSearch(hits),
+					},
+				],
+				details: {
+					hits: hits.length,
+					files: hits.map((hit) => ({
+						path: hit.memory.relativePath,
+						score: hit.score,
+						reasons: hit.reasons,
+					})),
+				},
+			};
+		},
+	});
+
 	pi.registerCommand("memory", {
-		description: "Show or refresh scoped MEMORY.md injection state",
+		description:
+			"Show, refresh, recall, or explain scoped project memory injection",
 		handler: async (args: string, ctx: ExtensionCommandContext) => {
-			const action = args.trim().toLowerCase() || "status";
+			const trimmed = args.trim();
+			const [rawAction = "status", ...rest] = trimmed.split(/\s+/);
+			const action = rawAction.toLowerCase();
 			if (action === "off") {
 				enabled = false;
+				pendingRecallQuery = null;
+				activeRecall = null;
 				ctx.ui.notify("Memory injection disabled for this session.", "info");
 				return;
 			}
@@ -363,6 +561,7 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 			if (action === "refresh") {
 				const changed = refreshBase(ctx.cwd);
 				epoch += 1;
+				activeRecall = null;
 				rebuildResidency(ctx);
 				ctx.ui.notify(
 					`Memory refreshed${changed ? " (base changed)" : ""}: ${snapshot.files.length} base, ${scopes.size} resident scope(s).`,
@@ -370,8 +569,53 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 				);
 				return;
 			}
+			if (action === "recall") {
+				const query = rest.join(" ").trim();
+				if (!query) {
+					ctx.ui.notify("Usage: /memory recall <query>", "warning");
+					return;
+				}
+				refreshBase(ctx.cwd);
+				const selection = buildRecall(query, ctx.cwd, {
+					automatic: false,
+					limit: 5,
+				});
+				if (!selection) {
+					lastRecall = null;
+					ctx.ui.notify(
+						"No matching discrete project memory found.",
+						"info",
+					);
+					return;
+				}
+				lastRecall = selection;
+				pi.sendMessage(
+					{
+						customType: RECALL_CUSTOM_TYPE,
+						content: selection.content,
+						display: true,
+						details: recallDetails(selection),
+					},
+					{ deliverAs: "followUp" },
+				);
+				return;
+			}
+			if (action === "explain") {
+				ctx.ui.notify(
+					lastRecall
+						? `Last recall: ${recallSummary(lastRecall)}`
+						: "No discrete memory recall has run in this session.",
+					"info",
+				);
+				return;
+			}
+			refreshBase(ctx.cwd);
+			const discreteCount = discoverDiscreteMemories(
+				ctx.cwd,
+				snapshot.projectRoot,
+			).length;
 			ctx.ui.notify(
-				`Memory: ${enabled ? "on" : "off"} · ${snapshot.files.length} base · ${scopes.size} resident/pending scope(s) · epoch ${epoch}`,
+				`Memory: ${enabled ? "on" : "off"} · ${snapshot.files.length} base · ${discreteCount} discrete · ${scopes.size} resident/pending scope(s) · epoch ${epoch}`,
 				"info",
 			);
 		},
@@ -380,6 +624,9 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event: SessionStartEvent, ctx) => {
 		currentTurn = 0;
 		epoch = 0;
+		pendingRecallQuery = null;
+		activeRecall = null;
+		lastRecall = null;
 		scopes.clear();
 		rebuildReadAnnouncements(ctx);
 		if (!enabled) return;
@@ -390,6 +637,9 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 	pi.on("session_tree", (_event, ctx) => {
 		if (!enabled) return;
 		epoch += 1;
+		pendingRecallQuery = null;
+		activeRecall = null;
+		lastRecall = null;
 		rebuildReadAnnouncements(ctx);
 		refreshBase(ctx.cwd);
 		rebuildResidency(ctx);
@@ -399,6 +649,16 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 		if (!enabled) return;
 		epoch += 1;
 		rebuildResidency(ctx);
+	});
+
+	pi.on("input", (event) => {
+		if (event.source === "extension") {
+			return { action: "continue" as const };
+		}
+		activeRecall = null;
+		const input = event.text.trim();
+		pendingRecallQuery = shouldAutoRecall(input) ? input : null;
+		return { action: "continue" as const };
 	});
 
 	pi.on("turn_start", (_event: TurnStartEvent) => {
@@ -417,10 +677,31 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 	pi.on("before_agent_start", (event: BeforeAgentStartEvent, ctx) => {
 		if (!enabled) return;
 		refreshBase(ctx.cwd);
-		if (snapshot.files.length === 0) return;
-		announceBaseRead();
+		const additions: string[] = [];
+		if (snapshot.files.length > 0) {
+			announceBaseRead();
+			additions.push(
+				`<project_memory>\n${formatBase(snapshot)}\n</project_memory>`,
+			);
+		}
+		if (pendingRecallQuery) {
+			activeRecall = buildRecall(pendingRecallQuery, ctx.cwd, {
+				automatic: true,
+			});
+			pendingRecallQuery = null;
+		} else if (activeRecall) {
+			activeRecall = buildRecall(activeRecall.query, ctx.cwd, {
+				automatic: true,
+			});
+		}
+		if (activeRecall) {
+			lastRecall = activeRecall;
+			announceRecall(activeRecall);
+			additions.push(activeRecall.content);
+		}
+		if (additions.length === 0) return;
 		return {
-			systemPrompt: `${event.systemPrompt}\n\n<project_memory>\n${formatBase(snapshot)}\n</project_memory>\n`,
+			systemPrompt: `${event.systemPrompt}\n\n${additions.join("\n\n")}\n`,
 		};
 	});
 
@@ -490,3 +771,11 @@ export {
 	looksMutatingBash,
 	truncateMemory,
 } from "./memory.ts";
+export {
+	discoverDiscreteMemories,
+	formatRecallSearch,
+	searchDiscreteMemories,
+	selectRecall,
+	shouldAutoRecall,
+	tokenizeRecallText,
+} from "./recall.ts";

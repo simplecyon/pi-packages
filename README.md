@@ -9,7 +9,7 @@ Cyon's package-only extensions and themes for
 | --- | --- | --- |
 | [`packages/pi-ask-user-question`](packages/pi-ask-user-question) | `@simplecyon/pi-ask-user-question` | Structured human-in-the-loop questions with exclusive TUI focus |
 | [`packages/pi-minimal-tui`](packages/pi-minimal-tui) | `@simplecyon/pi-minimal-tui` | Compact tool-event rendering and the `cyon-minimal-dark` theme |
-| [`packages/pi-memory`](packages/pi-memory) | `@simplecyon/pi-memory` | Cache-stable memory injection with scope-aware progressive disclosure |
+| [`packages/pi-memory`](packages/pi-memory) | `@simplecyon/pi-memory` | Scoped memory injection, deterministic `.memory` recall, and maintenance skill |
 | [`packages/pi-safe-operation`](packages/pi-safe-operation) | `@simplecyon/pi-safe-operation` | Destructive-operation safety, recoverable deletion, and secret-egress redaction |
 | [`packages/pi-context-compact`](packages/pi-context-compact) | `@simplecyon/pi-context-compact` | Durable compaction checkpoints and cold-history search |
 | [`packages/pi-context-engine`](packages/pi-context-engine) | `@simplecyon/pi-context-engine` | Pi-native context execution, indexing, search, continuity, and legacy migration |
@@ -66,7 +66,8 @@ pi install -l --approve /absolute/path/to/pi-packages
 ```
 
 The repository root is an aggregate Git package. Its manifest exposes all eleven
-extensions and the bundled theme. `pi-context-core` is a library dependency and
+extensions, the bundled `memory-maintainer` skill, and the theme.
+`pi-context-core` is a library dependency and
 does not load as an extension. The npm packages are separate distribution units
 with independent manifests, versions, tests, and compatibility boundaries.
 

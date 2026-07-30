@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { CompactDiffComponent, compactDiffLines } from "../src/diff.ts";
 
 const distantChanges = [
@@ -89,4 +90,13 @@ test("compact diff uses high-luminance semantic backgrounds in light themes", ()
 				"\x1b[48;2;223;228;227m<toolDiffAdded>+2 </toolDiffAdded><text>const newA = true;</text>\x1b[49m",
 		),
 	);
+});
+
+test("compact diff backgrounds fill the requested row width", () => {
+	const rendered = new CompactDiffComponent("-1 old\n+1 new", semanticTheme("dark")).render(24);
+
+	assert.equal(visibleWidth(rendered[0] ?? ""), 24);
+	assert.equal(visibleWidth(rendered[1] ?? ""), 24);
+	assert.match(rendered[0] ?? "", /^\x1b\[48;2;/);
+	assert.match(rendered[1] ?? "", /^\x1b\[48;2;/);
 });

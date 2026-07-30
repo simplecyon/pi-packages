@@ -56,6 +56,10 @@ function trimEmptyEdges(lines: string[]): string[] {
 function indentLine(line: string, width: number, preserveBackground = false): string {
 	const rendered = preserveBackground ? line : stripBackgroundAnsi(line);
 	if (width <= 2) return truncateToWidth(rendered, width);
+	if (preserveBackground) {
+		const withIndentedBackground = rendered.replace(/^(\x1b\[(?:4[0-9]|10[0-7]|48;(?:5;\d+|2;\d+;\d+;\d+))m)/, "$1  ");
+		if (withIndentedBackground !== rendered) return truncateToWidth(withIndentedBackground, width);
+	}
 	return truncateToWidth(`  ${rendered}`, width);
 }
 
