@@ -6,6 +6,7 @@ import {
 	MAX_TASKS,
 	MAX_TASK_ID_LENGTH,
 	MAX_TASK_TITLE_LENGTH,
+	RECOMMENDED_TASK_TITLE_LENGTH,
 	cloneTasks,
 	deriveTaskUIState,
 	diffTasks,
@@ -69,7 +70,8 @@ const TaskSchema = Type.Object(
 			maxLength: MAX_TASK_TITLE_LENGTH,
 			pattern: "^[^\\u0000-\\u001F\\u007F-\\u009F]+$",
 			description:
-				"Short verb-object label, ideally 2-6 words. Name one observable outcome; omit rationale, implementation detail, sequencing, and ending punctuation.",
+				`Short verb-object label, ideally 2-6 words and at most ${RECOMMENDED_TASK_TITLE_LENGTH} characters. ` +
+				"Longer titles are allowed when technical identifiers require them. Name one observable outcome; omit rationale, implementation detail, sequencing, and ending punctuation.",
 		}),
 		status: StringEnum(["pending", "in_progress", "completed"] as const),
 	},
@@ -249,7 +251,8 @@ export default function sessionTasksExtension(pi: ExtensionAPI): void {
 		promptGuidelines: [
 			"Use update_tasks when work requires 3 or more meaningful steps.",
 			"Do not use update_tasks for simple questions or short single-operation requests.",
-			"Write each title as a compact verb-object label: ideally 2-6 words and no more than 48 characters.",
+			`Write each title as a compact verb-object label: ideally 2-6 words and no more than ${RECOMMENDED_TASK_TITLE_LENGTH} characters. ` +
+				`The hard limit is ${MAX_TASK_TITLE_LENGTH} characters for titles that need technical identifiers.`,
 			"Each title should name one observable outcome. Omit rationale, implementation details, sequencing words, filler, and ending punctuation.",
 			"Prefer titles like \"Inspect task prompt\", \"Tighten title rules\", and \"Run focused tests\".",
 			"Keep the title unchanged for an existing task ID; routine updates should change only status.",

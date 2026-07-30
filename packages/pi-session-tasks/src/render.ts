@@ -179,6 +179,12 @@ function fallbackResultText(
 	return first?.type === "text" ? (first.text ?? "") : "";
 }
 
+function compactValidationError(text: string): string | undefined {
+	if (!text.startsWith('Validation failed for tool "update_tasks":')) return undefined;
+	const firstIssue = text.match(/^\s*-\s+(.+)$/m)?.[1]?.trim();
+	return `Task update rejected · ${firstIssue || "invalid arguments"}`;
+}
+
 export function renderToolCall(
 	args: { tasks?: unknown; expected_revision?: unknown },
 	theme: Theme,
@@ -198,7 +204,14 @@ export function renderToolResult(
 	theme: Theme,
 	expanded: boolean,
 ): Text {
-	if (!isTaskToolDetails(result.details)) return new Text(fallbackResultText(result), 0, 0);
+	if (!isTaskToolDetails(result.details)) {
+		const fallback = fallbackResultText(result);
+		const validationError = compactValidationError(fallback);
+		if (!expanded && validationError) {
+			return new Text(theme.fg("error", validationError), 0, 0);
+		}
+		return new Text(fallback, 0, 0);
+	}
 	if (!expanded) return new Text("", 0, 0);
 	const details = result.details;
 	if (details.unchanged) return new Text(theme.fg("dim", "Tasks unchanged"), 0, 0);

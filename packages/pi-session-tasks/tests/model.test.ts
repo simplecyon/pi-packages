@@ -45,16 +45,25 @@ test("validateTaskList keeps task titles compact", () => {
 			{ id: "concise", title: "Tighten title rules", status: "in_progress" },
 		]),
 	);
+	assert.doesNotThrow(() =>
+		validateTaskList([
+			{
+				id: "technical",
+				title: "修复 scroll-fade/scroll-bottom-btn 与 conversation 层级",
+				status: "in_progress",
+			},
+		]),
+	);
 	assert.throws(
 		() =>
 			validateTaskList([
 				{
 					id: "verbose",
-					title: "Document every implementation detail and explain why each individual step is necessary",
+					title: "x".repeat(121),
 					status: "in_progress",
 				},
 			]),
-		/1-48 non-blank characters/,
+		/1-120 non-blank characters/,
 	);
 });
 

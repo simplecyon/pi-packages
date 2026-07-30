@@ -65,7 +65,7 @@ test("extension registers read/write tools, command, and lifecycle handlers", as
 
 	assert.deepEqual([...extension.tools.keys()], ["get_tasks", "update_tasks"]);
 	assert.deepEqual(update.parameters.required, ["expected_revision", "tasks"]);
-	assert.equal(update.parameters.properties.tasks.items.properties.title.maxLength, 48);
+	assert.equal(update.parameters.properties.tasks.items.properties.title.maxLength, 120);
 	assert.match(
 		update.parameters.properties.tasks.items.properties.title.description,
 		/Short verb-object label/,
@@ -213,6 +213,32 @@ test("task tools use compact collapsed rows and reveal results only when expande
 	assert.match(
 		update.renderResult(retitled, { expanded: true }, theme, {}).render(80).join("\n"),
 		/Title changed  Verify compact rendering → Verify concise rendering/,
+	);
+});
+
+test("task validation failures stay concise until tool output is expanded", async () => {
+	const extension = await loadSessionTasks();
+	const update = toolDefinition(extension, "update_tasks");
+	const validationError = {
+		content: [
+			{
+				type: "text",
+				text:
+					'Validation failed for tool "update_tasks":\n' +
+					"  - tasks.1.title: must not have more than 120 characters\n\n" +
+					'Received arguments:\n{"tasks":[{"title":"very long title"}]}',
+			},
+		],
+		details: undefined,
+	};
+
+	assert.deepEqual(
+		update.renderResult(validationError, { expanded: false }, theme, {}).render(80).map((line: string) => line.trimEnd()),
+		["Task update rejected · tasks.1.title: must not have more than 120 characters"],
+	);
+	assert.match(
+		update.renderResult(validationError, { expanded: true }, theme, {}).render(80).join("\n"),
+		/Received arguments/,
 	);
 });
 

@@ -1,7 +1,7 @@
 export const MAX_TASKS = 12;
 export const MAX_TASK_ID_LENGTH = 48;
-export const MAX_TASK_TITLE_LENGTH = 48;
-const LEGACY_MAX_TASK_TITLE_LENGTH = 120;
+export const RECOMMENDED_TASK_TITLE_LENGTH = 48;
+export const MAX_TASK_TITLE_LENGTH = 120;
 
 export type TaskStatus = "pending" | "in_progress" | "completed";
 export type SessionPhase = "running" | "settled";
@@ -205,7 +205,7 @@ function isTaskSnapshot(value: unknown, minimumRevision: number): value is TaskS
 	}
 
 	try {
-		validateTaskList(snapshot.tasks as Task[], LEGACY_MAX_TASK_TITLE_LENGTH);
+		validateTaskList(snapshot.tasks as Task[]);
 		return true;
 	} catch {
 		return false;

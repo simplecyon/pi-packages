@@ -12,6 +12,8 @@ external project tracker.
 - `update_tasks` replaces the list only when `expected_revision` is current,
   preventing parallel or stale updates from overwriting newer state.
 - Task states are `pending`, `in_progress`, and `completed`.
+- Titles should normally stay within 48 characters. Technical identifiers may
+  make a title longer, up to a 120-character safety limit.
 - Exactly one task must be `in_progress` while unfinished work remains.
 - `paused` is a derived presentation state when Pi settles with unfinished
   work; it is not writable task data and does not guess why the agent stopped.
@@ -20,6 +22,8 @@ external project tracker.
 - An empty replacement clears the list.
 - Session reconstruction accepts older snapshots but validates stored render
   details before using them.
+- Argument-validation failures collapse to one concise reason in the TUI;
+  expanding tool output reveals Pi's complete diagnostic and received arguments.
 - Each accepted transition to `completed` emits a low-cardinality
   `session_task_completed` Token ROI milestone. Task IDs and titles are not
   included in that event.
