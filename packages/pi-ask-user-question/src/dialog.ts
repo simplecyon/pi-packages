@@ -16,6 +16,7 @@ export interface DialogResult {
 }
 
 interface TUIHandle {
+	readonly terminal: { readonly rows: number };
 	requestRender(): void;
 }
 
@@ -70,9 +71,26 @@ export class AskUserQuestionDialog {
 		return this.question().options.length + 1;
 	}
 
+	private otherFocused(): boolean {
+		return (
+			this.currentTab < this.questions.length &&
+			this.optionIndex === this.question().options.length
+		);
+	}
+
+	private syncEditorFocus(): void {
+		const focused = this.otherFocused();
+		this.editor.focused = focused;
+		if (focused) {
+			this.editor.setText(this.answers.get(this.currentTab)?.customText ?? "");
+		}
+	}
+
 	private moveToNext(): void {
 		this.currentTab = nextQuestionIndex(this.currentTab, this.questions, this.answers);
 		this.optionIndex = 0;
+		this.inputMode = false;
+		this.editor.focused = false;
 		this.pendingEscape = false;
 		this.refresh();
 	}
@@ -137,7 +155,7 @@ export class AskUserQuestionDialog {
 		if (this.inputMode) {
 			if (matchesKey(data, Key.escape)) {
 				this.inputMode = false;
-				this.editor.setText("");
+				this.editor.setText(this.answers.get(this.currentTab)?.customText ?? "");
 				this.refresh();
 				return;
 			}
@@ -160,12 +178,16 @@ export class AskUserQuestionDialog {
 		if (matchesKey(data, Key.tab) || matchesKey(data, Key.right)) {
 			this.currentTab = (this.currentTab + 1) % tabCount;
 			this.optionIndex = 0;
+			this.inputMode = false;
+			this.editor.focused = false;
 			this.refresh();
 			return;
 		}
 		if (matchesKey(data, Key.shift("tab")) || matchesKey(data, Key.left)) {
 			this.currentTab = (this.currentTab - 1 + tabCount) % tabCount;
 			this.optionIndex = 0;
+			this.inputMode = false;
+			this.editor.focused = false;
 			this.refresh();
 			return;
 		}
@@ -175,11 +197,15 @@ export class AskUserQuestionDialog {
 		}
 		if (matchesKey(data, Key.up)) {
 			this.optionIndex = (this.optionIndex - 1 + this.optionCount()) % this.optionCount();
+			this.inputMode = false;
+			this.syncEditorFocus();
 			this.refresh();
 			return;
 		}
 		if (matchesKey(data, Key.down)) {
 			this.optionIndex = (this.optionIndex + 1) % this.optionCount();
+			this.inputMode = false;
+			this.syncEditorFocus();
 			this.refresh();
 			return;
 		}
@@ -194,10 +220,16 @@ export class AskUserQuestionDialog {
 			this.refresh();
 			return;
 		}
+		if (otherSelected && !matchesKey(data, Key.enter)) {
+			this.inputMode = true;
+			this.editor.handleInput(data);
+			this.refresh();
+			return;
+		}
 		if (!matchesKey(data, Key.enter)) return;
 		if (otherSelected) {
 			this.inputMode = true;
-			this.editor.setText(this.answers.get(this.currentTab)?.customText ?? "");
+			this.editor.handleInput(data);
 			this.refresh();
 			return;
 		}
@@ -211,6 +243,7 @@ export class AskUserQuestionDialog {
 	render(width: number): string[] {
 		if (this.cachedLines) return this.cachedLines;
 		const safeWidth = Math.max(1, width);
+		const otherFocused = this.otherFocused();
 		const lines: string[] = [];
 		const wrap = (text: string, indent = "") => {
 			for (const [index, line] of wrapTextWithAnsi(text, Math.max(1, safeWidth - indent.length)).entries()) {
@@ -281,7 +314,7 @@ export class AskUserQuestionDialog {
 				wrap(this.theme.fg("dim", "Preview"));
 				for (const line of preview.split("\n")) wrap(this.theme.fg("text", line), "  ");
 			}
-			if (this.inputMode) {
+			if (otherFocused) {
 				lines.push("");
 				wrap(this.theme.fg("muted", "Your answer:"));
 				for (const line of this.editor.render(Math.max(1, safeWidth - 2))) lines.push(`  ${line}`);
@@ -293,8 +326,8 @@ export class AskUserQuestionDialog {
 				? this.theme.fg("warning", "Press Esc again to cancel")
 				: this.theme.fg(
 						"dim",
-						this.inputMode
-							? "Enter submit · Esc back"
+						otherFocused
+							? "Type directly · Enter submit · Esc back"
 							: "↑↓ move · Enter select/continue · Space toggle · Tab questions · Esc cancel",
 					),
 		);

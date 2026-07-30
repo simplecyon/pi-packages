@@ -16,6 +16,8 @@ The complete `simplecyon/pi-packages` Git package also includes this extension.
 
 - Ask one blocking question, or batch up to four independent questions.
 - Every question has 2-4 options and an automatic `Other...` answer.
+- Focus `Other...` and type immediately; the inline editor keeps the terminal
+  cursor aligned for CJK IME composition.
 - `preview` is available for single-select code, config, diagram, or ASCII comparisons.
 - The tool runs sequentially so interactive dialogs cannot overlap.
 - Double Escape cancels and returns control to chat without an automatic model follow-up.

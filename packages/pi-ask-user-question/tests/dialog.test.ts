@@ -23,7 +23,7 @@ const questions = [
 function createDialog(onDone: (result: DialogResult) => void) {
 	return new AskUserQuestionDialog(
 		questions,
-		{ requestRender() {} },
+		{ terminal: { rows: 24 }, requestRender() {} },
 		theme as never,
 		onDone,
 	);
@@ -44,6 +44,29 @@ test("selects an answer, reviews it, and submits", () => {
 	dialog.handleInput("\r");
 	assert.equal(results[0]?.cancelled, false);
 	assert.deepEqual(results[0]?.answers[0]?.selectedLabels, ["Compact (Recommended)"]);
+});
+
+test("accepts direct input when Other is focused", () => {
+	const results: DialogResult[] = [];
+	const dialog = createDialog((value) => {
+		results.push(value);
+	});
+	dialog.handleInput("\u001b[B");
+	dialog.handleInput("\u001b[B");
+	dialog.handleInput("自定义方案");
+	assert.match(dialog.render(60).join("\n"), /自定义方案/);
+	dialog.handleInput("\r");
+	dialog.handleInput("\r");
+	assert.equal(results[0]?.cancelled, false);
+	assert.equal(results[0]?.answers[0]?.customText, "自定义方案");
+	assert.deepEqual(results[0]?.answers[0]?.selectedLabels, []);
+});
+
+test("positions the IME hardware cursor at the Other input", () => {
+	const dialog = createDialog(() => {});
+	dialog.handleInput("\u001b[B");
+	dialog.handleInput("\u001b[B");
+	assert.match(dialog.render(60).join("\n"), /\u001b_pi:c\u0007/);
 });
 
 test("requires two consecutive Escape presses to cancel", () => {
