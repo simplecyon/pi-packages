@@ -95,6 +95,14 @@ compaction / branch end), so the `Thought for …` line survives across
 restarts. Turns that begin at a compaction boundary with no preceding user
 message in the branch cannot be anchored and are left without a duration.
 
+Turns that call no tools (pure thinking + text answer) get a standalone
+`• Thought for …` line appended after the answer via a non-context
+`CustomEntry` (`pi.appendEntry` + `registerEntryRenderer`). The entry is
+persisted and excluded from LLM context, so it survives reload without
+polluting the model's prompt. Turns ending in a non-groupable tool
+(`edit`/`write`) still do not host the duration on the tool itself and are
+left without a label for now.
+
 Pi 0.82.x does not expose per-message
 thinking timing or let packages replace each historical hidden-thinking label;
 the package therefore leaves Pi's native live `Thinking...` rendering intact.

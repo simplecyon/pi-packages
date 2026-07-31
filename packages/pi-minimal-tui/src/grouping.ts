@@ -94,6 +94,8 @@ export class ActionGroupCoordinator {
 	private views = new Map<string, GroupView>();
 	private invalidators = new Map<string, () => void>();
 	private agentStartedAt: number | undefined;
+	private turnHadTool = false;
+	private lastTurn: { elapsedMs: number | undefined; hadTool: boolean } | undefined;
 
 	reset(): void {
 		this.sequence = [];
@@ -101,6 +103,8 @@ export class ActionGroupCoordinator {
 		this.views.clear();
 		this.invalidators.clear();
 		this.agentStartedAt = undefined;
+		this.turnHadTool = false;
+		this.lastTurn = undefined;
 	}
 
 	registerRenderer(toolCallId: string, invalidate: () => void): void {
@@ -111,6 +115,10 @@ export class ActionGroupCoordinator {
 		return this.views.get(toolCallId);
 	}
 
+	getLastTurn(): { elapsedMs: number | undefined; hadTool: boolean } | undefined {
+		return this.lastTurn;
+	}
+
 	addBoundary(): void {
 		if (this.sequence.at(-1)?.kind !== "boundary") {
 			this.sequence.push({ kind: "boundary" });
@@ -119,6 +127,7 @@ export class ActionGroupCoordinator {
 
 	startAgent(startedAt = Date.now()): void {
 		this.agentStartedAt = startedAt;
+		this.turnHadTool = false;
 	}
 
 	finishAgent(finishedAt = Date.now()): void {
@@ -132,10 +141,12 @@ export class ActionGroupCoordinator {
 			this.sequence.push({ kind: "boundary", elapsedMs });
 		}
 		this.recompute();
+		this.lastTurn = { elapsedMs, hadTool: this.turnHadTool };
 	}
 
 	recordTool(toolCallId: string, toolName: string): void {
 		if (this.actions.has(toolCallId)) return;
+		this.turnHadTool = true;
 		const action: ActionRecord = { kind: "action", id: toolCallId, name: toolName, isError: false };
 		this.actions.set(toolCallId, action);
 		this.sequence.push(action);

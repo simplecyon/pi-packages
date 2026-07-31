@@ -14,7 +14,7 @@ import { CompactDiffComponent } from "./diff.ts";
 import { ActionGroupCoordinator } from "./grouping.ts";
 import { formatErrorOutcome } from "./outcome.ts";
 import { formatToolSummary } from "./summary.ts";
-import { MinimalToolCallComponent, MinimalToolResultComponent } from "./render.ts";
+import { MinimalToolCallComponent, MinimalToolResultComponent, ThoughtLineComponent } from "./render.ts";
 import { installCompactUserMessageRendering } from "./user-message.ts";
 
 interface MinimalRendererState {
@@ -28,6 +28,7 @@ const SAFE_REDACT_REQUEST = "simplecyon:safe-operation:redact";
 const BASH_REDACTION_OWNER_DISCOVER = "simplecyon:bash-redaction-owner:discover";
 const BASH_REDACTION_OWNER_AVAILABLE = "simplecyon:bash-redaction-owner:available";
 export const DEFAULT_BASH_TIMEOUT_SECONDS = 30;
+const THOUGHT_ENTRY_TYPE = "simplecyon/pi-minimal-tui/thought";
 
 function textResult(result: { content: Array<{ type: string; text?: string }> }): Text | undefined {
 	const output = result.content
@@ -172,6 +173,11 @@ export default function minimalTuiExtension(pi: ExtensionAPI): void {
 	installCompactUserMessageRendering();
 	const cwd = process.cwd();
 	const grouping = new ActionGroupCoordinator();
+	pi.registerEntryRenderer(THOUGHT_ENTRY_TYPE, (entry, _options, theme) => {
+		const elapsedMs = (entry.data as { elapsedMs?: number } | undefined)?.elapsedMs;
+		if (typeof elapsedMs !== "number" || !Number.isFinite(elapsedMs)) return undefined;
+		return new ThoughtLineComponent(elapsedMs, theme);
+	});
 	const announceBashRedactionOwner = () => {
 		pi.events.emit(BASH_REDACTION_OWNER_AVAILABLE, {
 			owner: "@simplecyon/pi-minimal-tui",
@@ -201,6 +207,10 @@ export default function minimalTuiExtension(pi: ExtensionAPI): void {
 	});
 	pi.on("agent_end", () => {
 		grouping.finishAgent();
+		const turn = grouping.getLastTurn();
+		if (turn && !turn.hadTool && turn.elapsedMs !== undefined) {
+			pi.appendEntry(THOUGHT_ENTRY_TYPE, { elapsedMs: turn.elapsedMs });
+		}
 	});
 
 	for (const definition of createMinimalToolDefinitions(cwd, grouping)) {

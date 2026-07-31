@@ -246,3 +246,20 @@ test("session replay closes each turn at the next user message", () => {
 	assert.equal(grouping.getView("c1")?.elapsedMs, 30_000);
 	assert.equal(grouping.getView("c2")?.elapsedMs, 20_000);
 });
+
+test("getLastTurn reports a no-tool turn as unhosted with elapsed time", () => {
+	const grouping = new ActionGroupCoordinator();
+	grouping.startAgent(1_000);
+	grouping.recordMessage({ role: "assistant", content: [{ type: "text", text: "answer" }] });
+	grouping.finishAgent(6_000);
+	assert.deepEqual(grouping.getLastTurn(), { elapsedMs: 5_000, hadTool: false });
+});
+
+test("getLastTurn flags turns that called tools", () => {
+	const grouping = new ActionGroupCoordinator();
+	grouping.startAgent(0);
+	grouping.recordTool("c1", "read");
+	grouping.finishAgent(8_000);
+	assert.equal(grouping.getLastTurn()?.hadTool, true);
+	assert.equal(grouping.getLastTurn()?.elapsedMs, 8_000);
+});

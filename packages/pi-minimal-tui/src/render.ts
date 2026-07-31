@@ -91,6 +91,30 @@ export function formatThoughtDuration(elapsedMs: number): string {
 	return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
 }
 
+export class ThoughtLineComponent implements Component {
+	private elapsedMs: number;
+	private theme: Theme;
+
+	constructor(elapsedMs: number, theme: Theme) {
+		this.elapsedMs = elapsedMs;
+		this.theme = theme;
+	}
+
+	render(width: number): string[] {
+		return [
+			truncateToWidth(
+				`${this.theme.fg("muted", "• ")}${this.theme.fg(
+					"thinkingText",
+					`Thought for ${formatThoughtDuration(this.elapsedMs)}`,
+				)}`,
+				width,
+			),
+		];
+	}
+
+	invalidate(): void {}
+}
+
 interface MinimalToolCallOptions {
 	getGroupView?: () => GroupView | undefined;
 	outcome?: string;
