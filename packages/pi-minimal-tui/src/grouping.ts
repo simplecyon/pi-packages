@@ -75,6 +75,12 @@ function stringField(value: unknown, ...keys: string[]): string | undefined {
 	return undefined;
 }
 
+function parseTimestamp(value: unknown): number | undefined {
+	if (typeof value !== "string" || value.length === 0) return undefined;
+	const ms = new Date(value).getTime();
+	return Number.isFinite(ms) ? ms : undefined;
+}
+
 function hasVisibleAssistantContent(block: unknown): boolean {
 	const type = stringField(block, "type");
 	if (type === "thinking" || type === "toolCall") return false;
@@ -182,10 +188,34 @@ export class ActionGroupCoordinator {
 			if (id && record.isError === true) errorIds.add(id);
 		}
 
+		// Replay entries in order and reconstruct the agent_start → agent_end
+		// lifecycle from persisted `SessionEntry.timestamp` values, so the
+		// "Thought for …" duration survives reload/resume/compaction rebuild.
+		// A user message starts a run (≈ agent_start); the next user message,
+		// a compaction, or a branch_summary entry closes it (≈ agent_end,
+		// approximated by the previous entry's persist time — the closest
+		// available witness to the live agent_end moment).
+		let prevMs: number | undefined;
 		for (const entry of entries) {
 			if (!entry || typeof entry !== "object") continue;
-			const message = (entry as Record<string, unknown>).message;
+			const record = entry as Record<string, unknown>;
+			const message = record.message;
+			const role = messageRole(message);
+			const type = typeof record.type === "string" ? record.type : undefined;
+			const entryMs = parseTimestamp(record.timestamp);
+			const closesRun =
+				role === "user" || type === "compaction" || type === "branch_summary";
+			if (closesRun && this.agentStartedAt !== undefined && prevMs !== undefined) {
+				this.finishAgent(prevMs);
+			}
 			this.recordMessage(message);
+			if (role === "user" && entryMs !== undefined) {
+				this.startAgent(entryMs);
+			}
+			if (entryMs !== undefined) prevMs = entryMs;
+		}
+		if (this.agentStartedAt !== undefined && prevMs !== undefined) {
+			this.finishAgent(prevMs);
 		}
 		for (const id of errorIds) this.markError(id);
 	}

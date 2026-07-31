@@ -213,3 +213,36 @@ test("tool calls after one thinking block remain in the same batch", () => {
 		summary: { verb: "Read 1 file, ran 1 bash" },
 	});
 });
+
+test("session replay reconstructs thought duration from entry timestamps", () => {
+	const grouping = new ActionGroupCoordinator();
+	grouping.rebuild([
+		{ type: "message", timestamp: "2026-01-01T00:00:00.000Z", message: { role: "user", content: [{ type: "text", text: "go" }] } },
+		{ type: "message", timestamp: "2026-01-01T00:00:05.000Z", message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read", arguments: {} }, { type: "toolCall", id: "c2", name: "grep", arguments: {} }] } },
+		{ type: "message", timestamp: "2026-01-01T00:00:06.000Z", message: { role: "toolResult", toolCallId: "c1", toolName: "read", content: [] } },
+		{ type: "message", timestamp: "2026-01-01T00:00:07.000Z", message: { role: "toolResult", toolCallId: "c2", toolName: "grep", content: [] } },
+		{ type: "message", timestamp: "2026-01-01T00:00:20.000Z", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
+	]);
+
+	assert.equal(grouping.getView("c1")?.hidden, true);
+	assert.equal(grouping.getView("c2")?.marker, "last");
+	assert.equal(grouping.getView("c2")?.elapsedMs, 20_000);
+	assert.deepEqual(grouping.getView("c2")?.summary, { verb: "Read 1 file, searched 1 time" });
+});
+
+test("session replay closes each turn at the next user message", () => {
+	const grouping = new ActionGroupCoordinator();
+	grouping.rebuild([
+		{ type: "message", timestamp: "2026-01-01T00:00:00.000Z", message: { role: "user", content: [{ type: "text", text: "go" }] } },
+		{ type: "message", timestamp: "2026-01-01T00:00:10.000Z", message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read", arguments: {} }] } },
+		{ type: "message", timestamp: "2026-01-01T00:00:11.000Z", message: { role: "toolResult", toolCallId: "c1", toolName: "read", content: [] } },
+		{ type: "message", timestamp: "2026-01-01T00:00:30.000Z", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
+		{ type: "message", timestamp: "2026-01-01T00:01:00.000Z", message: { role: "user", content: [{ type: "text", text: "again" }] } },
+		{ type: "message", timestamp: "2026-01-01T00:01:05.000Z", message: { role: "assistant", content: [{ type: "toolCall", id: "c2", name: "grep", arguments: {} }] } },
+		{ type: "message", timestamp: "2026-01-01T00:01:06.000Z", message: { role: "toolResult", toolCallId: "c2", toolName: "grep", content: [] } },
+		{ type: "message", timestamp: "2026-01-01T00:01:20.000Z", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } },
+	]);
+
+	assert.equal(grouping.getView("c1")?.elapsedMs, 30_000);
+	assert.equal(grouping.getView("c2")?.elapsedMs, 20_000);
+});

@@ -86,7 +86,16 @@ theme additionally tunes user-message and fallback surface colors.
 
 `Thought for …` measures the public `agent_start` → `agent_end` lifecycle, so
 it is the elapsed agent-run time (including tool execution), not a model-
-reported private thinking duration. Pi 0.82.x does not expose per-message
+reported private thinking duration.
+
+On reload, resume, or post-compaction rebuild, `session_start` replays the
+branch and the coordinator re-derives each turn's elapsed time from the
+persisted `SessionEntry.timestamp` values (user message → next user message /
+compaction / branch end), so the `Thought for …` line survives across
+restarts. Turns that begin at a compaction boundary with no preceding user
+message in the branch cannot be anchored and are left without a duration.
+
+Pi 0.82.x does not expose per-message
 thinking timing or let packages replace each historical hidden-thinking label;
 the package therefore leaves Pi's native live `Thinking...` rendering intact.
 It also does not add mouse interaction.
