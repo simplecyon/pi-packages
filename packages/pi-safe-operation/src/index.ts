@@ -155,6 +155,8 @@ const SAFE_CAPABILITY_AVAILABLE = "simplecyon:safe-operation:available";
 const SAFE_REDACT_REQUEST = "simplecyon:safe-operation:redact";
 const BASH_REDACTION_OWNER_DISCOVER = "simplecyon:bash-redaction-owner:discover";
 const BASH_REDACTION_OWNER_AVAILABLE = "simplecyon:bash-redaction-owner:available";
+const TOOL_RUNTIME_APPROVAL_END = "simplecyon:tool-runtime:approval-end";
+const DEFAULT_BASH_TIMEOUT_SECONDS = 30;
 
 function unique(values: string[]): string[] {
   return [...new Set(values)];
@@ -898,8 +900,16 @@ export default function (pi: ExtensionAPI) {
   function registerStandaloneBash(): void {
     if (externalBashRedactionOwner || standaloneBashRegistered) return;
     const builtinBash = createBashToolDefinition(process.cwd());
+    const originalPrepare = builtinBash.prepareArguments;
     pi.registerTool({
       ...builtinBash,
+      prepareArguments(args) {
+        const prepared = originalPrepare ? originalPrepare(args) : args;
+        if (!prepared || typeof prepared !== "object") return prepared as any;
+        const input = prepared as Record<string, unknown>;
+        if (typeof input.timeout === "number") return prepared as any;
+        return { ...input, timeout: DEFAULT_BASH_TIMEOUT_SECONDS } as any;
+      },
       async execute(toolCallId, params, signal, onUpdate, ctx) {
         const safeUpdate = onUpdate
           ? (partial: unknown) => onUpdate(sanitizeBashPayload(partial, "stream") as any)
@@ -916,21 +926,31 @@ export default function (pi: ExtensionAPI) {
     title: string,
     message: string,
     auditData: Record<string, unknown>,
+    runtime: { toolCallId: string; toolName: string },
   ): Promise<boolean> {
     if (!ctx.hasUI) {
       blockedTotal += 1;
       audit("blocked-no-ui", auditData);
       return false;
     }
-    const ok = await ctx.ui.confirm(title, message);
-    if (ok) {
-      approvedTotal += 1;
-      audit("approved", auditData);
-    } else {
-      blockedTotal += 1;
-      audit("declined", auditData);
+    const startedAt = Date.now();
+    try {
+      const ok = await ctx.ui.confirm(title, message);
+      if (ok) {
+        approvedTotal += 1;
+        audit("approved", auditData);
+      } else {
+        blockedTotal += 1;
+        audit("declined", auditData);
+      }
+      return ok;
+    } finally {
+      pi.events.emit(TOOL_RUNTIME_APPROVAL_END, {
+        toolCallId: runtime.toolCallId,
+        toolName: runtime.toolName,
+        durationMs: Math.max(0, Date.now() - startedAt),
+      });
     }
-    return ok;
   }
 
   pi.on("session_start", async (_event, ctx) => {
@@ -1005,7 +1025,7 @@ export default function (pi: ExtensionAPI) {
           tool: event.toolName,
           path: filePath,
           reasons,
-        });
+        }, { toolCallId: event.toolCallId, toolName: event.toolName });
         if (!ok) return { block: true, reason: `Write blocked by pi-safe-operation: ${reasons.join("; ")}` };
         return;
       }
@@ -1050,6 +1070,7 @@ export default function (pi: ExtensionAPI) {
               technicalDetails: redactText(command).text,
             }),
             { tool: "bash", operation: "git-clean", command: redactText(command).text },
+            { toolCallId: event.toolCallId, toolName: event.toolName },
           );
           if (!ok) return { block: true, reason: "git clean blocked by pi-safe-operation" };
           return;
@@ -1117,6 +1138,7 @@ export default function (pi: ExtensionAPI) {
             technicalDetails: redactText(command).text,
           }),
           { tool: "bash", operation: "delete", targets: targets.map((target) => target.relative) },
+          { toolCallId: event.toolCallId, toolName: event.toolName },
         );
         if (!ok) return { block: true, reason: "Permanent deletion blocked by pi-safe-operation" };
         return;
@@ -1142,6 +1164,7 @@ export default function (pi: ExtensionAPI) {
           technicalDetails: redactText(command).text,
         }),
         { tool: "bash", operation: "dangerous-command", reasons: uniqueReasons, command: redactText(command).text },
+        { toolCallId: event.toolCallId, toolName: event.toolName },
       );
       if (!ok) return { block: true, reason: `Command blocked by pi-safe-operation: ${uniqueReasons.join("; ")}` };
     } catch (error) {

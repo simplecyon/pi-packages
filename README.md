@@ -7,6 +7,7 @@ Cyon's package-only extensions and themes for
 
 | Workspace | Package | Purpose |
 | --- | --- | --- |
+| [`packages/pi-tool-runtime`](packages/pi-tool-runtime) | `@simplecyon/pi-tool-runtime` | Bounded tool-use guidance and phase-aware model/tool latency telemetry |
 | [`packages/pi-ask-user-question`](packages/pi-ask-user-question) | `@simplecyon/pi-ask-user-question` | Structured human-in-the-loop questions with exclusive TUI focus |
 | [`packages/pi-minimal-tui`](packages/pi-minimal-tui) | `@simplecyon/pi-minimal-tui` | Compact tool-event rendering and the `cyon-minimal-dark` theme |
 | [`packages/pi-memory`](packages/pi-memory) | `@simplecyon/pi-memory` | Scoped memory injection, deterministic `.memory` recall, and maintenance skill |
@@ -30,6 +31,7 @@ import it, require it, or assume its storage format; see
 Every workspace is an independent public npm package:
 
 ```bash
+pi install npm:@simplecyon/pi-tool-runtime
 pi install npm:@simplecyon/pi-ask-user-question
 pi install npm:@simplecyon/pi-minimal-tui
 pi install npm:@simplecyon/pi-memory
@@ -65,7 +67,7 @@ For local development:
 pi install -l --approve /absolute/path/to/pi-packages
 ```
 
-The repository root is an aggregate Git package. Its manifest exposes all eleven
+The repository root is an aggregate Git package. Its manifest exposes all twelve
 extensions, the bundled `memory-maintainer` skill, and the theme.
 `pi-context-core` is a library dependency and
 does not load as an extension. The npm packages are separate distribution units
@@ -73,13 +75,13 @@ with independent manifests, versions, tests, and compatibility boundaries.
 
 After installation, restart Pi. Use `/theme` to select
 `cyon-minimal-dark`; package commands such as `/memory`, `/context`,
-`/context-engine`, `/context-doctor`, `/artifacts`, `/roi`, `/tasks`, and `/skill-stats` become available
+`/context-engine`, `/context-doctor`, `/artifacts`, `/roi`, `/runtime`, `/tasks`, and `/skill-stats` become available
 automatically.
 
 ## Requirements
 
 - Node.js 22.19 or newer
-- Pi `@earendil-works/pi-*` 0.82.x
+- Pi `@earendil-works/pi-*` 0.82.1 through 0.83.x
 - A trusted project when loading project-local extensions
 
 ## Development

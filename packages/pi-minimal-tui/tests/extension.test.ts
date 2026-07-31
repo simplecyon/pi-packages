@@ -5,7 +5,11 @@ import { join } from "node:path";
 import test from "node:test";
 import { initTheme, type ExtensionAPI, type Theme, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { ActionGroupCoordinator } from "../src/grouping.ts";
-import minimalTuiExtension, { createMinimalToolDefinitions } from "../src/index.ts";
+import minimalTuiExtension, {
+	addDefaultBashTimeout,
+	createMinimalToolDefinitions,
+	DEFAULT_BASH_TIMEOUT_SECONDS,
+} from "../src/index.ts";
 
 const ANSI_PATTERN = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g;
 
@@ -35,6 +39,22 @@ test("registers all built-in tools with self-rendered shells", () => {
 		["read", "bash", "edit", "write", "grep", "find", "ls"],
 	);
 	assert.ok(tools.every((tool) => tool.renderShell === "self"));
+});
+
+test("injects a finite Bash timeout without overriding an explicit value", () => {
+	const definitions = createMinimalToolDefinitions(process.cwd());
+	const bash = definitions.find((tool) => tool.name === "bash") as ToolDefinition;
+	assert.deepEqual(
+		bash.prepareArguments?.({ command: "git status" }),
+		{ command: "git status", timeout: DEFAULT_BASH_TIMEOUT_SECONDS },
+	);
+	assert.deepEqual(
+		bash.prepareArguments?.({ command: "npm test", timeout: 120 }),
+		{ command: "npm test", timeout: 120 },
+	);
+
+	const read = definitions.find((tool) => tool.name === "read") as ToolDefinition;
+	assert.equal(addDefaultBashTimeout(read), read);
 });
 
 test("forwards Bash partial and final output through the safety redaction bridge", async () => {

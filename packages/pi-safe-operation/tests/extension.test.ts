@@ -273,6 +273,13 @@ test("explains a force push in decision language before showing the command", as
     assert.match(prompt, /--force-with-lease/);
     assert.ok(prompt.indexOf("准备执行") < prompt.indexOf(command));
     assert.ok(prompt.indexOf("你需要知道的风险") < prompt.indexOf(command));
+    const approvalEvent = extension.emitted.find(
+      (event) => event.channel === "simplecyon:tool-runtime:approval-end",
+    );
+    assert.ok(approvalEvent);
+    assert.equal((approvalEvent.data as any).toolCallId, "force-push-copy");
+    assert.equal((approvalEvent.data as any).toolName, "bash");
+    assert.equal(typeof (approvalEvent.data as any).durationMs, "number");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -612,6 +619,14 @@ test("redacts Bash streaming updates before they reach the runtime renderer", as
 
     const bash = extension.tools.get("bash");
     assert.ok(bash);
+    assert.deepEqual(
+      bash.definition.prepareArguments({ command: "git status" }),
+      { command: "git status", timeout: 30 },
+    );
+    assert.deepEqual(
+      bash.definition.prepareArguments({ command: "npm test", timeout: 120 }),
+      { command: "npm test", timeout: 120 },
+    );
     const secret = ["xoxb", "1234567890", "streamingfixture"].join("-");
     const updates: unknown[] = [];
     const result = await bash.definition.execute(

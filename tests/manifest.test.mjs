@@ -21,6 +21,7 @@ const expectedPackages = new Map([
 	["pi-session-tasks", "@simplecyon/pi-session-tasks"],
 	["pi-skill-telemetry", "@simplecyon/pi-skill-telemetry"],
 	["pi-token-roi", "@simplecyon/pi-token-roi"],
+	["pi-tool-runtime", "@simplecyon/pi-tool-runtime"],
 ]);
 
 test("aggregate manifest points to existing package resources", () => {
@@ -29,7 +30,7 @@ test("aggregate manifest points to existing package resources", () => {
 		...(manifest.pi?.skills ?? []),
 		...(manifest.pi?.themes ?? []),
 	];
-	assert.equal(resources.length, 13);
+	assert.equal(resources.length, expectedPackages.size + 1);
 	for (const resource of resources) {
 		assert.equal(
 			fs.existsSync(path.resolve(root, resource)),

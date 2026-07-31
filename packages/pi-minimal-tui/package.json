@@ -1,6 +1,6 @@
 {
   "name": "@simplecyon/pi-minimal-tui",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "type": "module",
   "description": "Compact, low-noise TUI rendering for Pi built-in tools",
   "keywords": [
@@ -43,8 +43,8 @@
     ]
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.82.1 <0.83.0",
-    "@earendil-works/pi-tui": ">=0.82.1 <0.83.0"
+    "@earendil-works/pi-coding-agent": ">=0.82.1 <0.84.0",
+    "@earendil-works/pi-tui": ">=0.82.1 <0.84.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.82.1",

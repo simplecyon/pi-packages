@@ -10,6 +10,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const aggregateManifest = JSON.parse(
+	fs.readFileSync(path.join(root, "package.json"), "utf8"),
+);
 const workspaces = [
 	["pi-ask-user-question", 1, 0, 0],
 	["pi-context-artifacts", 1, 0, 0],
@@ -22,6 +25,7 @@ const workspaces = [
 	["pi-session-tasks", 1, 0, 0],
 	["pi-skill-telemetry", 1, 0, 0],
 	["pi-token-roi", 1, 0, 0],
+	["pi-tool-runtime", 1, 0, 0],
 ];
 
 async function loadPackage(packageRoot, agentDir) {
@@ -68,10 +72,11 @@ test("Pi loads the aggregate package without duplicate or invalid resources", as
 	assert.deepEqual(extensionResult.errors, []);
 	assert.deepEqual(skillResult.diagnostics, []);
 	assert.deepEqual(themeResult.diagnostics, []);
-	assert.equal(extensionResult.extensions.length, 11);
+	const expectedExtensionCount = aggregateManifest.pi.extensions.length;
+	assert.equal(extensionResult.extensions.length, expectedExtensionCount);
 	assert.equal(
 		new Set(extensionResult.extensions.map((extension) => extension.path)).size,
-		11,
+		expectedExtensionCount,
 	);
 	assert.deepEqual(
 		themeResult.themes.map((theme) => theme.name),

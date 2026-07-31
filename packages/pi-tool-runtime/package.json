@@ -1,22 +1,20 @@
 {
-  "name": "@simplecyon/pi-safe-operation",
-  "version": "0.1.2",
+  "name": "@simplecyon/pi-tool-runtime",
+  "version": "0.1.0",
   "type": "module",
-  "description": "Operation safety and secret egress guardrails for Pi",
+  "description": "Bounded tool-use guidance and phase-aware latency telemetry for Pi",
   "keywords": [
     "pi-package",
     "pi-extension",
-    "safety",
-    "guardrails",
-    "secret-redaction"
+    "tool-runtime",
+    "telemetry"
   ],
-  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/simplecyon/pi-packages.git",
-    "directory": "packages/pi-safe-operation"
+    "directory": "packages/pi-tool-runtime"
   },
-  "homepage": "https://github.com/simplecyon/pi-packages/tree/main/packages/pi-safe-operation#readme",
+  "homepage": "https://github.com/simplecyon/pi-packages/tree/main/packages/pi-tool-runtime#readme",
   "bugs": {
     "url": "https://github.com/simplecyon/pi-packages/issues"
   },
@@ -24,6 +22,7 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
+  "license": "MIT",
   "files": [
     "src",
     "README.md",
@@ -40,13 +39,11 @@
     ]
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.82.1 <0.84.0",
-    "typebox": ">=1.1.38 <2.0.0"
+    "@earendil-works/pi-coding-agent": ">=0.82.1 <0.84.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.82.1",
     "@types/node": "^24.0.0",
-    "typebox": "1.1.38",
     "typescript": "^5.9.3"
   },
   "engines": {

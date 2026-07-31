@@ -3,6 +3,10 @@
 Compact, low-noise rendering for Pi's built-in tool events, plus the
 `cyon-minimal-dark` theme.
 
+Built-in Bash calls receive a 30-second timeout when the model does not provide
+one explicitly. Explicit timeout values are preserved; Pi interprets them as
+seconds.
+
 ## What it changes
 
 - Collapsed tool calls use a consistent `Category (detail)` shape, such as

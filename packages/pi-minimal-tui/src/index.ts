@@ -27,6 +27,7 @@ interface MinimalRendererState {
 const SAFE_REDACT_REQUEST = "simplecyon:safe-operation:redact";
 const BASH_REDACTION_OWNER_DISCOVER = "simplecyon:bash-redaction-owner:discover";
 const BASH_REDACTION_OWNER_AVAILABLE = "simplecyon:bash-redaction-owner:available";
+export const DEFAULT_BASH_TIMEOUT_SECONDS = 30;
 
 function textResult(result: { content: Array<{ type: string; text?: string }> }): Text | undefined {
 	const output = result.content
@@ -112,6 +113,24 @@ function decorateTool(base: ToolDefinition, grouping: ActionGroupCoordinator): T
 	};
 }
 
+export function addDefaultBashTimeout(
+	definition: ToolDefinition,
+	defaultTimeoutSeconds = DEFAULT_BASH_TIMEOUT_SECONDS,
+): ToolDefinition {
+	if (definition.name !== "bash") return definition;
+	const originalPrepare = definition.prepareArguments;
+	return {
+		...definition,
+		prepareArguments(args) {
+			const prepared = originalPrepare ? originalPrepare(args) : args;
+			if (!prepared || typeof prepared !== "object") return prepared as any;
+			const input = prepared as Record<string, unknown>;
+			if (typeof input.timeout === "number") return prepared as any;
+			return { ...input, timeout: defaultTimeoutSeconds } as any;
+		},
+	};
+}
+
 function addBashRedactionBridge(definition: ToolDefinition, pi: ExtensionAPI): ToolDefinition {
 	if (definition.name !== "bash") return definition;
 	const originalExecute = definition.execute;
@@ -144,7 +163,9 @@ export function createMinimalToolDefinitions(
 		createGrepToolDefinition(cwd),
 		createFindToolDefinition(cwd),
 		createLsToolDefinition(cwd),
-	].map((definition) => decorateTool(definition as ToolDefinition, grouping));
+	]
+		.map((definition) => addDefaultBashTimeout(definition as ToolDefinition))
+		.map((definition) => decorateTool(definition, grouping));
 }
 
 export default function minimalTuiExtension(pi: ExtensionAPI): void {

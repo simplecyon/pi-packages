@@ -3,6 +3,14 @@
 Operation safety and secret-egress guardrails for
 [Pi](https://github.com/earendil-works/pi).
 
+When this package owns the standalone built-in Bash registration, missing
+timeouts default to 30 seconds. Explicit timeout values are preserved and use
+Pi's seconds unit.
+
+Interactive write/edit and dangerous-Bash confirmations emit metadata-only
+approval durations on the Pi event bus. `pi-tool-runtime` uses this to keep
+human approval time separate from command execution time.
+
 The extension creates two runtime boundaries:
 
 - **Action boundary** — blocks structurally unsafe deletion, protects configured

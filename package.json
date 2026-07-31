@@ -21,6 +21,7 @@
   },
   "pi": {
     "extensions": [
+      "./packages/pi-tool-runtime/src/index.ts",
       "./packages/pi-ask-user-question/src/index.ts",
       "./packages/pi-safe-operation/src/index.ts",
       "./packages/pi-context-artifacts/src/index.ts",
