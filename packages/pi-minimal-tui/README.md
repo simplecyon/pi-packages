@@ -103,10 +103,11 @@ polluting the model's prompt. Turns ending in a non-groupable tool
 (`edit`/`write`) still do not host the duration on the tool itself and are
 left without a label for now.
 
-Pi 0.82.x does not expose per-message
-thinking timing or let packages replace each historical hidden-thinking label;
-the package therefore leaves Pi's native live `Thinking...` rendering intact.
-It also does not add mouse interaction.
+Pi 0.82.x does not expose per-message thinking timing. While a run is
+streaming the package keeps Pi's native live `Thinking...` label so the user
+still sees a thinking indicator; once the turn completes, the per-run
+placeholder labels are stripped and the package's own `• Thought for …` takes
+over. It also does not add mouse interaction.
 
 It decorates public built-in tool definitions rather than reimplementing tool
 execution. Renderer contracts can still change between Pi minor versions.

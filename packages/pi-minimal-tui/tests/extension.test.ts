@@ -30,6 +30,8 @@ test("registers all built-in tools with self-rendered shells", () => {
 		registerTool(tool: { name: string; renderShell?: string }) {
 			tools.push(tool);
 		},
+		registerEntryRenderer() {},
+		appendEntry() {},
 	} as unknown as ExtensionAPI;
 
 	minimalTuiExtension(pi);
@@ -76,6 +78,8 @@ test("forwards Bash partial and final output through the safety redaction bridge
 		registerTool(tool: ToolDefinition) {
 			tools.set(tool.name, tool);
 		},
+		registerEntryRenderer() {},
+		appendEntry() {},
 	} as unknown as ExtensionAPI;
 	minimalTuiExtension(pi);
 	const bash = tools.get("bash");

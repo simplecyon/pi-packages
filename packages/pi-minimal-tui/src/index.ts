@@ -16,6 +16,7 @@ import { formatErrorOutcome } from "./outcome.ts";
 import { formatToolSummary } from "./summary.ts";
 import { MinimalToolCallComponent, MinimalToolResultComponent, ThoughtLineComponent } from "./render.ts";
 import { installCompactUserMessageRendering } from "./user-message.ts";
+import { installThinkingSuppression } from "./thinking-suppression.ts";
 
 interface MinimalRendererState {
 	callInner?: ReturnType<NonNullable<ToolDefinition["renderCall"]>>;
@@ -171,6 +172,7 @@ export function createMinimalToolDefinitions(
 
 export default function minimalTuiExtension(pi: ExtensionAPI): void {
 	installCompactUserMessageRendering();
+	installThinkingSuppression();
 	const cwd = process.cwd();
 	const grouping = new ActionGroupCoordinator();
 	pi.registerEntryRenderer(THOUGHT_ENTRY_TYPE, (entry, _options, theme) => {
