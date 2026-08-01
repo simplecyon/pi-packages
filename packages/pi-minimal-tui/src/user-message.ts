@@ -10,6 +10,9 @@ const DIM_ARROW = "\x1b[2m>\x1b[22m ";
 const MEDIUM_TEXT_START = "\x1b[1m";
 const MEDIUM_TEXT_END = "\x1b[22m";
 const UPPER_QUARTER_BLOCK = "\u{1fb82}";
+// 底线色对齐 cyon-minimal-dark 的 borderMuted(darkGray=#505050)，不复用 userMessageBg，
+// 避免在深色终端(尤其 VSCode minimumContrastRatio 提亮)下底线过亮。
+const BORDER_LINE_RGB = "80;80;80";
 
 interface PatchableUserMessagePrototype {
 	render(width: number): string[];
@@ -43,7 +46,8 @@ function quarterHeightBottomPadding(lines: string[], width: number): string[] {
 	const strip = last
 		.replace(/\x1b\[48;/g, "\x1b[38;")
 		.replace(/\x1b\[49m/g, "\x1b[39m")
-		.replace(/ /g, UPPER_QUARTER_BLOCK);
+		.replace(/ /g, UPPER_QUARTER_BLOCK)
+		.replace(/\x1b\[38;[0-9;]*m/g, `\x1b[38;2;${BORDER_LINE_RGB}m`);
 	const fill = UPPER_QUARTER_BLOCK.repeat(Math.max(0, width - visibleWidth(strip)));
 	compacted[lastIndex] = strip.replace(/\x1b\[39m$/, `${fill}\x1b[39m`);
 	return compacted;
