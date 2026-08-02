@@ -18,7 +18,11 @@ function visuallyBlank(line: string): boolean {
 }
 
 function styleUserMessageLine(line: string): string {
-	if (visuallyBlank(line)) return line;
+	if (visuallyBlank(line)) {
+		// padding 行去掉背景色块，变成终端背景留白(保留 OSC133 标记)，
+		// 让 user message 上下稍高但不笨重，内容行仍保留色块区分。
+		return line.replace(/\x1b\[48;[0-9;]*m/g, "").replace(/\x1b\[49m/g, "");
+	}
 
 	const styled = line.replace(
 		LEFT_PADDING_PATTERN,
