@@ -3,14 +3,14 @@ import { UserMessageComponent } from "@earendil-works/pi-coding-agent";
 const ANSI_SOURCE = String.raw`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))`;
 const ANSI_PATTERN = new RegExp(ANSI_SOURCE, "g");
 const LEFT_PADDING_PATTERN = new RegExp(`^((?:${ANSI_SOURCE})*) ((?:${ANSI_SOURCE})*)`);
-const PATCH_MARKER = Symbol.for("@simplecyon/pi-minimal-tui/compact-user-message");
+const CORE_RENDER = Symbol.for("@simplecyon/pi-minimal-tui/core-render");
 const DIM_ARROW = "\x1b[2m>\x1b[22m ";
 const MEDIUM_TEXT_START = "\x1b[1m";
 const MEDIUM_TEXT_END = "\x1b[22m";
 
 interface PatchableUserMessagePrototype {
 	render(width: number): string[];
-	[PATCH_MARKER]?: boolean;
+	[CORE_RENDER]?: (width: number) => string[];
 }
 
 function visuallyBlank(line: string): boolean {
@@ -34,15 +34,16 @@ function styleUserMessageLine(line: string): string {
 
 export function installCompactUserMessageRendering(): void {
 	const prototype = UserMessageComponent.prototype as PatchableUserMessagePrototype;
-	if (prototype[PATCH_MARKER]) return;
-
-	const originalRender = prototype.render;
+	// 保存 pi core 原版 render(进程级持久)，extension 热加载重跑时复用，避免 patch 套娃
+	if (!prototype[CORE_RENDER]) {
+		prototype[CORE_RENDER] = prototype.render;
+	}
+	const coreRender = prototype[CORE_RENDER]!;
 	prototype.render = function renderCompactUserMessage(width: number): string[] {
 		// 保留 pi core 原始的上下背景色 padding 收边，不画 ▔ 前景线。
 		// 背景色不受终端 minimumContrastRatio 影响，颜色准确；
 		// 块也比之前的 compact 版高一行(顶部 padding 恢复)。
-		const lines = originalRender.call(this, Math.max(1, width - 1));
+		const lines = coreRender.call(this, Math.max(1, width - 1));
 		return lines.map(styleUserMessageLine);
 	};
-	prototype[PATCH_MARKER] = true;
 }
