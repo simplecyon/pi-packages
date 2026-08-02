@@ -200,25 +200,25 @@ export default function askUserQuestionExtension(pi: ExtensionAPI): void {
 					"muted",
 					`${count} question${count === 1 ? "" : "s"}`,
 				)}`,
-				0,
+				1,
 				0,
 			);
 		},
 
 		renderResult(result, _options, theme) {
 			const details = result.details as AskUserQuestionDetails | undefined;
-			if (!details) return new Text("", 0, 0);
+			if (!details) return new Text("", 1, 0);
 			if (details.status === "cancelled") {
-				return new Text(theme.fg("warning", "Question cancelled"), 0, 0);
+				return new Text(theme.fg("warning", "Question cancelled"), 1, 0);
 			}
 			if (details.status === "unavailable") {
-				return new Text(theme.fg("warning", "Question unavailable"), 0, 0);
+				return new Text(theme.fg("warning", "Question unavailable"), 1, 0);
 			}
 			return new Text(
 				details.answers
 					.map((answer) => `${theme.fg("success", "✓")} ${theme.fg("text", answerSummary(answer))}`)
 					.join("\n"),
-				0,
+				1,
 				0,
 			);
 		},

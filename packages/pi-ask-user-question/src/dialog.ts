@@ -242,7 +242,8 @@ export class AskUserQuestionDialog {
 
 	render(width: number): string[] {
 		if (this.cachedLines) return this.cachedLines;
-		const safeWidth = Math.max(1, width);
+		const margin = 1;
+		const safeWidth = Math.max(1, width - margin * 2);
 		const otherFocused = this.otherFocused();
 		const lines: string[] = [];
 		const wrap = (text: string, indent = "") => {
@@ -332,7 +333,8 @@ export class AskUserQuestionDialog {
 					),
 		);
 		lines.push(this.theme.fg("accent", "─".repeat(safeWidth)));
-		this.cachedLines = lines.map((line) => truncateToWidth(line, safeWidth));
+		const leftPad = " ".repeat(margin);
+		this.cachedLines = lines.map((line) => truncateToWidth(`${leftPad}${line}`, width));
 		return this.cachedLines;
 	}
 
