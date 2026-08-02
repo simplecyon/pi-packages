@@ -18,6 +18,10 @@ function visuallyBlank(line: string): boolean {
 }
 
 function styleUserMessageLine(line: string): string {
+	if (visuallyBlank(line)) {
+		// padding 行去掉背景色块，变终端背景留白(保留 OSC133 标记)
+		return line.replace(/\x1b\[48;2;\d{1,3};\d{1,3};\d{1,3}m/g, "").replace(/\x1b\[49m/g, "");
+	}
 	const styled = line.replace(
 		LEFT_PADDING_PATTERN,
 		(_match, controlsBefore: string, controlsAfter: string) =>
@@ -34,21 +38,9 @@ export function installCompactUserMessageRendering(): void {
 	}
 	const coreRender = prototype[CORE_RENDER]!;
 	prototype.render = function renderCompactUserMessage(width: number): string[] {
-		// 委托 pi core 原版 render，产出 [OSC_START+顶pad, 内容..., OSC_END+FINAL+底pad]；
-		// 过滤上下 padding 行只留内容行(1 行，line-height 100%)，
-		// 把 OSC133 标记从 padding 行剥离、移到内容行首尾。
-		const raw = coreRender.call(this, Math.max(1, width - 1));
-		if (raw.length === 0) return raw;
-		const oscStart = raw[0].match(/^\x1b\]133;A\x07/)?.[0] ?? "";
-		const oscEndFinal = raw[raw.length - 1].match(/^\x1b\]133;B\x07\x1b\]133;C\x07/)?.[0] ?? "";
-		const stripped = raw.slice();
-		if (oscStart) stripped[0] = stripped[0].slice(oscStart.length);
-		if (oscEndFinal) stripped[stripped.length - 1] = stripped[stripped.length - 1].slice(oscEndFinal.length);
-		const content = stripped.filter((line) => !visuallyBlank(line));
-		if (content.length === 0) return raw.map(styleUserMessageLine);
-		const styled = content.map(styleUserMessageLine);
-		styled[0] = oscStart + styled[0];
-		styled[styled.length - 1] = styled[styled.length - 1] + oscEndFinal;
-		return styled;
+		// 委托 pi core 原版 render(上下 padding + 内容)；
+		// padding 行去背景色变终端背景留白(无底色)，内容行保留 #343541 色块 + > 前缀。
+		const lines = coreRender.call(this, Math.max(1, width - 1));
+		return lines.map(styleUserMessageLine);
 	};
 }
