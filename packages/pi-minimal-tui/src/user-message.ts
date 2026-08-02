@@ -40,9 +40,9 @@ export function installCompactUserMessageRendering(): void {
 	}
 	const coreRender = prototype[CORE_RENDER]!;
 	prototype.render = function renderCompactUserMessage(width: number): string[] {
-		// 保留 pi core 原始的上下背景色 padding 收边，不画 ▔ 前景线。
-		// 背景色不受终端 minimumContrastRatio 影响，颜色准确；
-		// 块也比之前的 compact 版高一行(顶部 padding 恢复)。
+		// 委托 pi core 原版 render，产出上下 padding + 内容行；
+		// 随后由 styleUserMessageLine 把 padding 行的背景色去掉(变终端背景留白)，
+		// 只保留内容行的色块作为区分，避免上下色块过重。
 		const lines = coreRender.call(this, Math.max(1, width - 1));
 		return lines.map(styleUserMessageLine);
 	};
