@@ -19,9 +19,10 @@ function visuallyBlank(line: string): boolean {
 
 function styleUserMessageLine(line: string): string {
 	if (visuallyBlank(line)) {
-		// padding 行去掉背景色块，变成终端背景留白(保留 OSC133 标记)，
-		// 让 user message 上下稍高但不笨重，内容行仍保留色块区分。
-		return line.replace(/\x1b\[48;[0-9;]*m/g, "").replace(/\x1b\[49m/g, "");
+		// padding 行换更暗的背景色作可见收边(比内容 userMessageBg 暗一档)，
+		// 形成外部暗 < padding 中暗 < 内容 的层次，可见但不全是同色重块；
+		// 保留 OSC133 标记。匹配任意 truecolor 背景码替换为 #2d2d33。
+		return line.replace(/\x1b\[48;2;\d{1,3};\d{1,3};\d{1,3}m/g, "\x1b[48;2;45;45;51m");
 	}
 
 	const styled = line.replace(
