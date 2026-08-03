@@ -20,7 +20,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-export type PermissionMode = "ask" | "plan" | "auto";
+export type InteractionMode = "chat" | "plan" | "accept-edits" | "auto";
 
 const ASK_USER_QUESTION_REQUEST_EVENT = "simplecyon:ask-user-question:request";
 const TASKS_AVAILABLE_EVENT = "simplecyon:session-tasks:available";
@@ -219,6 +219,10 @@ export interface PlanModeController {
   isPlanningPhase(): boolean;
   /** True while executing an approved plan. */
   isExecutingPlan(): boolean;
+  /** Enter the planning phase without relying on a fresh session. */
+  enterPlanning(ctx: ExtensionContext): void;
+  /** Leave an unapproved planning phase and restore normal tools. */
+  exitPlanning(ctx: ExtensionContext): void;
 }
 
 interface PersistedPlanState {
@@ -263,8 +267,8 @@ function uniqueToolNames(toolNames: string[]): string[] {
 export function setupPermissionMode(
   pi: ExtensionAPI,
   opts: {
-    getPermissionMode: () => PermissionMode;
-    setPermissionMode?: (mode: PermissionMode, ctx: ExtensionContext) => Promise<void>;
+    getInteractionMode: () => InteractionMode;
+    setInteractionMode?: (mode: InteractionMode, ctx: ExtensionContext) => Promise<void>;
   },
 ): PlanModeController {
   let planModeEnabled = false;
@@ -362,20 +366,30 @@ export function setupPermissionMode(
     } satisfies PersistedPlanState);
   }
 
-  function togglePlanMode(ctx: ExtensionContext): void {
-    planModeEnabled = !planModeEnabled;
+  function enterPlanning(ctx: ExtensionContext): void {
+    if (planModeEnabled && !executionMode) return;
+    planModeEnabled = true;
     executionMode = false;
     todoItems = [];
-
-    if (planModeEnabled) {
-      enablePlanModeTools();
-      ctx.ui.notify("Plan mode enabled. Write tools disabled until the plan is approved.", "info");
-    } else {
-      restoreNormalModeTools();
-      ctx.ui.notify("Plan mode disabled. Full access restored.", "info");
-    }
+    enablePlanModeTools();
+    ctx.ui.notify("Plan mode enabled. Write tools disabled until the plan is approved.", "info");
     updateStatus(ctx);
     persistState();
+  }
+
+  function exitPlanning(ctx: ExtensionContext): void {
+    if (!planModeEnabled || executionMode) return;
+    planModeEnabled = false;
+    todoItems = [];
+    restoreNormalModeTools();
+    ctx.ui.notify("Plan mode disabled. Full access restored.", "info");
+    updateStatus(ctx);
+    persistState();
+  }
+
+  function togglePlanMode(ctx: ExtensionContext): void {
+    if (planModeEnabled && !executionMode) exitPlanning(ctx);
+    else enterPlanning(ctx);
   }
 
   pi.registerCommand("plan", {
@@ -448,6 +462,19 @@ After completing a step, include a [DONE:n] tag in your response.`,
         },
       };
     }
+
+    if (opts.getInteractionMode() === "auto") {
+      return {
+        message: {
+          customType: "pi-safe-operation:auto-context",
+          content: `[AUTO MODE]
+Continue until the task has verified completion, no policy-compliant path remains, or only the user can supply a preference, authorization, or missing information.
+
+Technical uncertainty is not a reason to stop: inspect, test, and try a safer alternative. Treat judge and policy feedback as a constraint on the intended effect; revise the plan instead of retrying an equivalent action. Do not ask the user to approve a technical operation that the judge rejected.`,
+          display: false,
+        },
+      };
+    }
   });
 
   // Filter out stale plan-mode context when neither planning nor executing.
@@ -494,11 +521,11 @@ After completing a step, include a [DONE:n] tag in your response.`,
     const options = [
       {
         label: "Execute in Auto mode",
-        description: "Let the judge model approve flagged actions automatically while the plan runs.",
+        description: "Let the judge model evaluate risky actions; the agent revises and continues without technical approval dialogs.",
       },
       {
-        label: "Execute this plan",
-        description: "Run the approved steps with the normal permission checks and confirmations.",
+        label: "Execute in Accept edits mode",
+        description: "Apply ordinary edits automatically; ask you before each flagged operation.",
       },
       {
         label: "Chat about this plan",
@@ -564,16 +591,20 @@ After completing a step, include a [DONE:n] tag in your response.`,
       display: true,
     };
 
-    if (choice === "Execute in Auto mode" || choice === "Execute this plan" || choice === "Execute the plan (track progress)") {
-      if (choice === "Execute in Auto mode") {
-        await opts.setPermissionMode?.("auto", ctx);
-      }
+    if (choice === "Execute in Auto mode" || choice === "Execute in Accept edits mode") {
       const firstTodoItem = todoItems[0];
       if (!firstTodoItem) return;
 
+      // Leave the planning phase before updating the interaction mode, so the
+      // mode controller does not interpret plan approval as a manual exit.
       planModeEnabled = false;
       executionMode = true;
       restoreNormalModeTools();
+      if (choice === "Execute in Auto mode") {
+        await opts.setInteractionMode?.("auto", ctx);
+      } else {
+        await opts.setInteractionMode?.("accept-edits", ctx);
+      }
       updateStatus(ctx);
       persistState();
 
@@ -617,8 +648,8 @@ After completing a step, include a [DONE:n] tag in your response.`;
       todoItems = persistedData.todos ?? todoItems;
       executionMode = persistedData.executing ?? executionMode;
       toolsBeforePlanMode = persistedData.toolsBeforePlanMode ?? toolsBeforePlanMode;
-    } else if (opts.getPermissionMode() === "plan") {
-      // Fresh session with permissionMode "plan": start in the planning phase.
+    } else if (opts.getInteractionMode() === "plan") {
+      // Fresh session with interactionMode "plan": start in the planning phase.
       planModeEnabled = true;
     }
 
@@ -652,5 +683,7 @@ After completing a step, include a [DONE:n] tag in your response.`;
   return {
     isPlanningPhase: () => planModeEnabled && !executionMode,
     isExecutingPlan: () => executionMode,
+    enterPlanning,
+    exitPlanning,
   };
 }

@@ -19,7 +19,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { isSafePlanCommand, setupPermissionMode } from "./permission-mode.ts";
-import type { PermissionMode } from "./permission-mode.ts";
+import type { InteractionMode } from "./permission-mode.ts";
 import {
   DEFAULT_JUDGE_CONFIG,
   judgeAdjudicate,
@@ -61,7 +61,7 @@ interface RedactionConfig {
 interface SafeOperationConfig {
   version: number;
   mode: "balanced" | "strict";
-  permissionMode: PermissionMode;
+  interactionMode: InteractionMode;
   protectedPaths: string[];
   noDeletePaths: string[];
   sensitivePaths: string[];
@@ -126,7 +126,7 @@ interface ApprovalCopy {
 const DEFAULT_CONFIG: SafeOperationConfig = {
   version: 1,
   mode: "balanced",
-  permissionMode: "ask",
+  interactionMode: "accept-edits",
   protectedPaths: [
     ".git",
     ".pi/safe-operation.json",
@@ -199,14 +199,27 @@ function unique(values: string[]): string[] {
   return [...new Set(values)];
 }
 
-const PERMISSION_AUTONOMY: Record<PermissionMode, number> = { ask: 0, plan: 1, auto: 2 };
+const INTERACTION_AUTONOMY: Record<InteractionMode, number> = {
+  chat: 0,
+  plan: 1,
+  "accept-edits": 2,
+  auto: 3,
+};
 
-function normalizePermissionMode(value: unknown, fallback: PermissionMode): PermissionMode {
-  return value === "ask" || value === "plan" || value === "auto" ? value : fallback;
+function normalizeInteractionMode(value: unknown, fallback: InteractionMode): InteractionMode {
+  if (value === "chat" || value === "plan" || value === "accept-edits" || value === "auto") return value;
+  // Legacy permissionMode used "ask" for the behavior now named accept-edits.
+  if (value === "ask") return "accept-edits";
+  return fallback;
 }
 
-function leastAutonomousMode(a: PermissionMode, b: PermissionMode): PermissionMode {
-  return PERMISSION_AUTONOMY[a] <= PERMISSION_AUTONOMY[b] ? a : b;
+function requestedInteractionMode(next: Partial<SafeOperationConfig>, fallback: InteractionMode): InteractionMode {
+  const legacy = (next as Record<string, unknown>).permissionMode;
+  return normalizeInteractionMode(next.interactionMode ?? legacy, fallback);
+}
+
+function leastAutonomousMode(a: InteractionMode, b: InteractionMode): InteractionMode {
+  return INTERACTION_AUTONOMY[a] <= INTERACTION_AUTONOMY[b] ? a : b;
 }
 
 function mergeConfig(base: SafeOperationConfig, next: Partial<SafeOperationConfig>): SafeOperationConfig {
@@ -215,7 +228,7 @@ function mergeConfig(base: SafeOperationConfig, next: Partial<SafeOperationConfi
     ...next,
     version: 1,
     mode: next.mode === "strict" ? "strict" : base.mode,
-    permissionMode: normalizePermissionMode(next.permissionMode, base.permissionMode),
+    interactionMode: requestedInteractionMode(next, base.interactionMode),
     judge: normalizeJudgeConfig(next.judge, base.judge),
     protectedPaths: unique([...base.protectedPaths, ...(next.protectedPaths ?? [])]),
     noDeletePaths: unique([...base.noDeletePaths, ...(next.noDeletePaths ?? [])]),
@@ -259,9 +272,8 @@ function loadConfig(cwd: string, projectTrusted: boolean): SafeOperationConfig {
       // user's egress boundary or raise destructive-operation limits.
       config = {
         ...merged,
-        // A trusted project may tighten autonomy toward "ask" but must not
-        // unilaterally escalate it (e.g. silently enabling judge auto-approval).
-        permissionMode: leastAutonomousMode(baseline.permissionMode, merged.permissionMode),
+        // A trusted project may only reduce the user's execution autonomy.
+        interactionMode: leastAutonomousMode(baseline.interactionMode, merged.interactionMode),
         maxExplicitTargets: Math.min(baseline.maxExplicitTargets, merged.maxExplicitTargets),
         redaction: {
           ...merged.redaction,
@@ -1047,14 +1059,10 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  // Adjudication seam: permissionMode selects how a flagged operation is decided.
-  // The runtime planning phase blocks every flagged operation outright (the
-  // write/bash gates in the tool_call handler are the primary enforcement; this
-  // is the backstop), regardless of how plan mode was entered (config, --plan
-  // flag, or /plan command). In the execution phase, "plan" falls back to
-  // interactive confirmation for flagged operations; "auto" routes the operation
-  // to the judge model (allow / adjust-block / escalate), fail-closed on any
-  // judge failure. Returns true to allow, or the block reason string.
+  // Adjudication seam: deterministic hard blocks run before this point.
+  // Accept-edits asks the user about flagged operations. Auto sends them to the
+  // judge, which either allows the operation or returns constraints to the main
+  // Agent for a safer re-plan; technical operation risk never becomes a popup.
   async function adjudicate(
     ctx: any,
     title: string,
@@ -1069,7 +1077,7 @@ export default function (pi: ExtensionAPI) {
       audit("blocked-plan-phase", auditData);
       return declineReason;
     }
-    if (config.permissionMode === "auto") {
+    if (config.interactionMode === "auto") {
       return judgeAdjudicate({
         ctx,
         judgeConfig: config.judge,
@@ -1092,7 +1100,7 @@ export default function (pi: ExtensionAPI) {
               toolCallId: runtime.toolCallId,
               decision: "auto-approved",
             });
-            updatePermissionModeStatus(ctx);
+            updateInteractionModeStatus(ctx);
           },
           countBlocked: () => {
             blockedTotal += 1;
@@ -1141,7 +1149,7 @@ export default function (pi: ExtensionAPI) {
           const sessionName = ctx.sessionManager.getSessionName?.();
           if (sessionName) cwd += ` • ${sessionName}`;
 
-          const permission = theme.fg("accent", `permission: ${config.permissionMode}`);
+          const permission = theme.fg("accent", `mode: ${config.interactionMode}`);
           const cwdWidth = visibleWidth(cwd);
           const permissionWidth = visibleWidth(permission);
           const firstLine = cwdWidth + permissionWidth + 2 <= width
@@ -1212,13 +1220,13 @@ export default function (pi: ExtensionAPI) {
     });
   }
 
-  function updatePermissionModeStatus(ctx: any): void {
+  function updateInteractionModeStatus(ctx: any): void {
     if (!ctx.hasUI || typeof ctx.ui?.setStatus !== "function") return;
-    const text = config.permissionMode === "auto"
-      ? `permission: auto · auto ✓${autoApprovedTotal}`
-      : `permission: ${config.permissionMode}`;
+    const text = config.interactionMode === "auto"
+      ? `mode: auto · auto ✓${autoApprovedTotal}`
+      : `mode: ${config.interactionMode}`;
     ctx.ui.setStatus(
-      "permission-mode",
+      "interaction-mode",
       typeof ctx.ui.theme?.fg === "function" ? ctx.ui.theme.fg("accent", text) : text,
     );
   }
@@ -1234,12 +1242,21 @@ export default function (pi: ExtensionAPI) {
     judgeAnnounced = false;
     permissionFooterInstalled = false;
     installPermissionFooter(ctx);
-    updatePermissionModeStatus(ctx);
+    updateInteractionModeStatus(ctx);
     registerStandaloneBash();
   });
 
   pi.on("tool_call", async (event, ctx) => {
     try {
+      if (config.interactionMode === "chat" && !planMode.isPlanningPhase()) {
+        blockedTotal += 1;
+        audit("blocked-chat-mode", { tool: event.toolName });
+        return {
+          block: true,
+          reason: "Chat mode is active: no tools or state changes are available. Switch to plan, accept-edits, or auto mode before acting.",
+        };
+      }
+
       if (event.toolName === "read" && isToolCallEventType("read", event)) {
         const filePath = event.input.path ?? "";
         const keyPattern = privateKeyPath(filePath);
@@ -1297,7 +1314,7 @@ export default function (pi: ExtensionAPI) {
           if (status.code === 0 && status.stdout.trim()) reasons.push("target already has uncommitted changes");
         }
         if (reasons.length === 0) {
-          if (config.permissionMode === "auto" && config.judge.auditSafeOps) {
+          if (config.interactionMode === "auto" && config.judge.auditSafeOps) {
             const safeVerdict = await adjudicate(
               ctx,
               "裁判审计：文件修改",
@@ -1479,7 +1496,7 @@ export default function (pi: ExtensionAPI) {
         if (knowledgeDir) reasons.push(`code mutation references vault knowledge directory: ${knowledgeDir}/`);
       }
       if (reasons.length === 0) {
-        if (config.permissionMode === "auto" && config.judge.auditSafeOps && looksLikeMutatingBash(command)) {
+        if (config.interactionMode === "auto" && config.judge.auditSafeOps && looksLikeMutatingBash(command)) {
           const safeVerdict = await adjudicate(
             ctx,
             "裁判审计：变更命令",
@@ -2076,53 +2093,64 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Shared by /permission-mode and the alt+m cycle shortcut: persist to the
-  // global config, apply in-memory for the current session, and tell the user
-  // what changed.
-  async function applyPermissionMode(mode: PermissionMode, ctx: any): Promise<void> {
-    if (!persistGlobalConfig((raw) => { raw.permissionMode = mode; })) {
+  // Shared by /mode, the legacy /permission-mode alias, and alt+m. The global
+  // config persists the user-visible interaction mode; legacy permissionMode is
+  // read on startup but never written again.
+  async function applyInteractionMode(mode: InteractionMode, ctx: any): Promise<void> {
+    if (!persistGlobalConfig((raw) => {
+      raw.interactionMode = mode;
+      delete raw.permissionMode;
+    })) {
       ctx.ui.notify(`写入全局配置失败: ${globalConfigFilePath()}`, "error");
       return;
     }
-    config.permissionMode = mode;
-    updatePermissionModeStatus(ctx);
+    config.interactionMode = mode;
+    if (mode === "plan") planMode.enterPlanning(ctx);
+    else if (planMode.isPlanningPhase()) planMode.exitPlanning(ctx);
+    updateInteractionModeStatus(ctx);
     const judge = config.judge.provider && config.judge.model
       ? `${config.judge.provider}/${config.judge.model}`
       : "default";
-    ctx.ui.notify(`permission: ${mode} · judge: ${judge}`, "info");
+    ctx.ui.notify(`mode: ${mode}${mode === "auto" ? ` · judge: ${judge}` : ""}`, "info");
   }
 
-  const PERMISSION_MODE_CYCLE: PermissionMode[] = ["ask", "plan", "auto"];
+  const INTERACTION_MODE_CYCLE: InteractionMode[] = ["chat", "plan", "accept-edits", "auto"];
   pi.registerShortcut("alt+m", {
-    description: "Cycle permission mode (ask → plan → auto)",
+    description: "Cycle interaction mode (chat → plan → accept-edits → auto)",
     handler: async (ctx) => {
-      const index = PERMISSION_MODE_CYCLE.indexOf(config.permissionMode);
-      const next = PERMISSION_MODE_CYCLE[(index + 1) % PERMISSION_MODE_CYCLE.length];
-      await applyPermissionMode(next, ctx);
+      const index = INTERACTION_MODE_CYCLE.indexOf(config.interactionMode);
+      const next = INTERACTION_MODE_CYCLE[(index + 1) % INTERACTION_MODE_CYCLE.length];
+      await applyInteractionMode(next, ctx);
     },
   });
 
+  async function handleModeCommand(args: unknown, ctx: any): Promise<void> {
+    const value = typeof args === "string" ? args.trim() : "";
+    if (!value) {
+      ctx.ui.notify(
+        [
+          `interaction mode: ${config.interactionMode}`,
+          `judge: ${config.judge.provider && config.judge.model ? `${config.judge.provider}/${config.judge.model}` : "内置默认候选（按 modelRegistry + auth 解析）"}`,
+          "设置: /mode chat|plan|accept-edits|auto（写入全局配置，本会话即时生效）；alt+m 循环切换。",
+        ].join("\n"),
+        "info",
+      );
+      return;
+    }
+    if (value !== "chat" && value !== "plan" && value !== "accept-edits" && value !== "auto") {
+      ctx.ui.notify(`未知 interaction mode: ${value}。可选: chat | plan | accept-edits | auto`, "error");
+      return;
+    }
+    await applyInteractionMode(value as InteractionMode, ctx);
+  }
+
+  pi.registerCommand("mode", {
+    description: "Show or set interaction mode (chat | plan | accept-edits | auto)",
+    handler: handleModeCommand,
+  });
   pi.registerCommand("permission-mode", {
-    description: "Show or set permission mode (ask | plan | auto); persists to the global config",
-    handler: async (args, ctx) => {
-      const value = (args ?? "").trim();
-      if (!value) {
-        ctx.ui.notify(
-          [
-            `permission mode: ${config.permissionMode}`,
-            `judge: ${config.judge.provider && config.judge.model ? `${config.judge.provider}/${config.judge.model}` : "内置默认候选（按 modelRegistry + auth 解析）"}`,
-            "设置: /permission-mode ask|plan|auto（写入全局配置，本会话即时生效）；alt+m 循环切换。",
-          ].join("\n"),
-          "info",
-        );
-        return;
-      }
-      if (value !== "ask" && value !== "plan" && value !== "auto") {
-        ctx.ui.notify(`未知 permission mode: ${value}。可选: ask | plan | auto`, "error");
-        return;
-      }
-      await applyPermissionMode(value as PermissionMode, ctx);
-    },
+    description: "Legacy alias for /mode",
+    handler: handleModeCommand,
   });
 
   pi.registerCommand("judge-model", {
@@ -2220,7 +2248,7 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       ctx.ui.notify(
         [
-          `pi-safe-operation: ${config.mode} · permission: ${config.permissionMode}`,
+          `pi-safe-operation: ${config.mode} · mode: ${config.interactionMode}`,
           `root: ${root}`,
           `redacted: ${redactedTotal}`,
           `approved: ${approvedTotal}`,
@@ -2282,11 +2310,10 @@ export default function (pi: ExtensionAPI) {
 
   // Permission-mode runtime (plan-mode state machine). Registered LAST so this
   // package's own session_start (config load) and context (redaction) handlers
-  // keep their registration order ahead of permission-mode's handlers: config
-  // must be loaded before permission-mode reads getPermissionMode(), and the
-  // egress redaction pass stays the first context transform.
+  // Keep registration ahead of the plan controller: config must load before it
+  // reads interaction mode, and egress redaction remains the first context pass.
   const planMode = setupPermissionMode(pi, {
-    getPermissionMode: () => config.permissionMode,
-    setPermissionMode: applyPermissionMode,
+    getInteractionMode: () => config.interactionMode,
+    setInteractionMode: applyInteractionMode,
   });
 }

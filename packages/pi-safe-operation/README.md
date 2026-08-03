@@ -103,6 +103,44 @@ operation limits.
 requires approval for ordinary write/edit and mutating Bash calls, and rejects
 raw project deletion in favor of `safe_delete`.
 
+## Interaction modes
+
+Set the user-level `interactionMode` in `~/.pi/agent/safe-operation.json`, or
+switch it at runtime with `/mode` (the legacy `/permission-mode` remains an
+alias). The default is `accept-edits`, preserving the former default behavior.
+
+- `chat` — conversation only; all tools are blocked.
+- `plan` — read-only exploration and a numbered plan. Approval chooses whether
+  to execute in `accept-edits` or `auto`.
+- `accept-edits` — ordinary edits run; deterministic flagged operations ask the
+  user for confirmation.
+- `auto` — the Agent continues autonomously. The judge reviews mutation
+  operations from redacted facts: `allow` executes; `adjust` or `escalate`
+  blocks the current operation and returns actionable constraints to the main
+  Agent, which must re-plan rather than turn technical risk into a user popup.
+
+```json
+{
+  "interactionMode": "auto",
+  "judge": {
+    "provider": "google",
+    "model": "gemini-2.5-flash",
+    "maxTokens": 1024,
+    "timeoutMs": 20000,
+    "reasoning": "low"
+  }
+}
+```
+
+In auto mode, the Agent stops only after verified completion, when no
+policy-compliant path remains, or when the user must supply a preference,
+authorization, or missing information. Technical uncertainty should trigger
+inspection, testing, or a safer alternative instead. `judge.auditSafeOps`
+defaults to `true`, so ordinary mutations are also reviewed; deterministic
+hard blocks never reach the model. Legacy `permissionMode: "ask" | "plan" |
+"auto"` is read for compatibility (`ask` maps to `accept-edits`) but is no
+longer written.
+
 ## Security boundary
 
 The extension runs inside Pi and is not an OS sandbox. It sanitizes Bash
