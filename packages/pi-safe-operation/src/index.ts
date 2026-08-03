@@ -34,6 +34,19 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
+const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
+
+function visibleWidth(text: string): number {
+  return text.replace(ANSI_PATTERN, "").length;
+}
+
+function truncateToWidth(text: string, width: number, ellipsis = "…"): string {
+  if (width <= 0) return "";
+  if (visibleWidth(text) <= width) return text;
+  const suffix = ellipsis.slice(0, Math.min(ellipsis.length, width));
+  return text.replace(ANSI_PATTERN, "").slice(0, Math.max(0, width - suffix.length)) + suffix;
+}
+
 type FileKind = "file" | "directory" | "symlink" | "other" | "missing";
 type GitClass = "tracked" | "ignored" | "untracked" | "outside";
 
@@ -1087,6 +1100,119 @@ export default function (pi: ExtensionAPI) {
     return (await interactiveConfirm(ctx, title, message, auditData, runtime)) ? true : declineReason;
   }
 
+  function formatTokens(count: number): string {
+    if (count < 1000) return count.toString();
+    if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
+    if (count < 1000000) return `${Math.round(count / 1000)}k`;
+    if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
+    return `${Math.round(count / 1000000)}M`;
+  }
+
+  function formatFooterCwd(cwd: string): string {
+    const home = process.env.HOME || process.env.USERPROFILE;
+    if (!home) return cwd;
+    const relative = path.relative(path.resolve(home), path.resolve(cwd));
+    const insideHome = relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+    return insideHome ? (relative === "" ? "~" : `~${path.sep}${relative}`) : cwd;
+  }
+
+  let permissionFooterInstalled = false;
+
+  function installPermissionFooter(ctx: any): void {
+    if (permissionFooterInstalled || ctx.mode !== "tui" || typeof ctx.ui?.setFooter !== "function") return;
+    permissionFooterInstalled = true;
+    ctx.ui.setFooter((tui: any, theme: any, footerData: any) => {
+      const unsubscribe = footerData.onBranchChange(() => tui.requestRender());
+      return {
+        dispose: unsubscribe,
+        invalidate() {},
+        render(width: number): string[] {
+          const branch = footerData.getGitBranch();
+          let cwd = formatFooterCwd(ctx.sessionManager.getCwd());
+          if (branch) cwd += ` (${branch})`;
+          const sessionName = ctx.sessionManager.getSessionName?.();
+          if (sessionName) cwd += ` • ${sessionName}`;
+
+          const permission = theme.fg("accent", `permission: ${config.permissionMode}`);
+          const cwdWidth = visibleWidth(cwd);
+          const permissionWidth = visibleWidth(permission);
+          const firstLine = cwdWidth + permissionWidth + 2 <= width
+            ? theme.fg("dim", cwd) + " ".repeat(width - cwdWidth - permissionWidth) + permission
+            : truncateToWidth(theme.fg("dim", cwd), Math.max(0, width - permissionWidth - 1), theme.fg("dim", "...")) + " " + permission;
+
+          let input = 0;
+          let output = 0;
+          let cacheRead = 0;
+          let cacheWrite = 0;
+          let cost = 0;
+          let latestCacheHitRate: number | undefined;
+          for (const entry of ctx.sessionManager.getEntries()) {
+            if (entry.type !== "message") continue;
+            const usage = (entry.message as any).usage;
+            if (!usage) continue;
+            input += usage.input ?? 0;
+            output += usage.output ?? 0;
+            cacheRead += usage.cacheRead ?? 0;
+            cacheWrite += usage.cacheWrite ?? 0;
+            cost += usage.cost?.total ?? 0;
+            const promptTokens = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+            if (promptTokens > 0) latestCacheHitRate = ((usage.cacheRead ?? 0) / promptTokens) * 100;
+          }
+          const contextUsage = ctx.getContextUsage?.();
+          const contextWindow = contextUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0;
+          const contextPercent = contextUsage?.percent;
+          const contextText = contextPercent === null || contextPercent === undefined
+            ? `?/${formatTokens(contextWindow)} (auto)`
+            : `${contextPercent.toFixed(1)}%/${formatTokens(contextWindow)} (auto)`;
+          const statsParts = [
+            input && `↑${formatTokens(input)}`,
+            output && `↓${formatTokens(output)}`,
+            cacheRead && `R${formatTokens(cacheRead)}`,
+            cacheWrite && `W${formatTokens(cacheWrite)}`,
+            latestCacheHitRate !== undefined && `CH${latestCacheHitRate.toFixed(1)}%`,
+            cost && `$${cost.toFixed(3)}`,
+            contextPercent !== null && contextPercent !== undefined && contextPercent > 90
+              ? theme.fg("error", contextText)
+              : contextPercent !== null && contextPercent !== undefined && contextPercent > 70
+                ? theme.fg("warning", contextText)
+                : contextText,
+          ].filter(Boolean);
+          const stats = statsParts.join(" ");
+          const model = ctx.model?.id || "no-model";
+          let modelText = ctx.model?.reasoning
+            ? `${model} • ${ctx.thinkingLevel || "off"}`
+            : model;
+          const availableProviders = typeof ctx.modelRegistry?.getAvailable === "function"
+            ? new Set(ctx.modelRegistry.getAvailable().map((item: any) => item.provider)).size
+            : 1;
+          if (availableProviders > 1 && ctx.model) modelText = `(${ctx.model.provider}) ${modelText}`;
+          const statsWidth = visibleWidth(stats);
+          const modelWidth = visibleWidth(modelText);
+          const secondLine = statsWidth + modelWidth + 2 <= width
+            ? theme.fg("dim", stats) + " ".repeat(width - statsWidth - modelWidth) + theme.fg("dim", modelText)
+            : theme.fg("dim", truncateToWidth(stats, Math.max(0, width - modelWidth - 1), "...")) + " " + theme.fg("dim", modelText);
+
+          const extensionStatuses = [...footerData.getExtensionStatuses().entries()]
+            .filter(([key]: [string, string]) => key !== "permission-mode")
+            .sort(([a]: [string, string], [b]: [string, string]) => a.localeCompare(b))
+            .map(([, text]: [string, string]) => text.replace(/[\\r\\n\\t]/g, " ").replace(/ +/g, " ").trim());
+          return extensionStatuses.length > 0
+            ? [firstLine, secondLine, truncateToWidth(extensionStatuses.join(" "), width, theme.fg("dim", "..."))]
+            : [firstLine, secondLine];
+        },
+      };
+    });
+  }
+
+  function updatePermissionModeStatus(ctx: any): void {
+    if (!ctx.hasUI || typeof ctx.ui?.setStatus !== "function") return;
+    const text = `permission: ${config.permissionMode}`;
+    ctx.ui.setStatus(
+      "permission-mode",
+      typeof ctx.ui.theme?.fg === "function" ? ctx.ui.theme.fg("accent", text) : text,
+    );
+  }
+
   pi.on("session_start", async (_event, ctx) => {
     root = ctx.cwd;
     sessionKey = crypto.randomBytes(32);
@@ -1095,6 +1221,9 @@ export default function (pi: ExtensionAPI) {
     approvedTotal = 0;
     config = loadConfig(root, ctx.isProjectTrusted());
     judgeAnnounced = false;
+    permissionFooterInstalled = false;
+    installPermissionFooter(ctx);
+    updatePermissionModeStatus(ctx);
     registerStandaloneBash();
   });
 
@@ -1945,18 +2074,11 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     config.permissionMode = mode;
-    const lines = [`permission mode 已设为 ${mode}（已写入全局配置，本会话即时生效）。`];
-    if (mode === "plan") {
-      lines.push("plan 的只读工具门在会话开始时生效；要立即进入规划阶段请使用 /plan 或 ctrl+alt+p。");
-    }
-    if (mode === "auto") {
-      lines.push(
-        config.judge.provider && config.judge.model
-          ? `裁判模型: ${config.judge.provider}/${config.judge.model}（/judge-model 可修改）。`
-          : "裁判模型: 内置默认候选（按 modelRegistry + auth 解析）；建议用 /judge-model 显式指定。",
-      );
-    }
-    ctx.ui.notify(lines.join("\n"), "info");
+    updatePermissionModeStatus(ctx);
+    const judge = config.judge.provider && config.judge.model
+      ? `${config.judge.provider}/${config.judge.model}`
+      : "default";
+    ctx.ui.notify(`permission: ${mode} · judge: ${judge}`, "info");
   }
 
   const PERMISSION_MODE_CYCLE: PermissionMode[] = ["ask", "plan", "auto"];
@@ -1997,16 +2119,55 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const value = (args ?? "").trim();
       if (!value) {
-        ctx.ui.notify(
-          [
-            config.judge.provider && config.judge.model
-              ? `judge: ${config.judge.provider}/${config.judge.model}`
-              : "judge: 内置默认候选（按 modelRegistry + auth 解析）",
-            `onFailure: ${config.judge.onFailure} · auditSafeOps: ${config.judge.auditSafeOps ? "on" : "off"}`,
-            "设置: /judge-model <provider>/<model>（写入全局配置，即时生效）",
-          ].join("\n"),
-          "info",
-        );
+        if (!ctx.hasUI) {
+          ctx.ui.notify(
+            [
+              config.judge.provider && config.judge.model
+                ? `judge: ${config.judge.provider}/${config.judge.model}`
+                : "judge: 内置默认候选（按 modelRegistry + auth 解析）",
+              `onFailure: ${config.judge.onFailure} · auditSafeOps: ${config.judge.auditSafeOps ? "on" : "off"}`,
+              "设置: /judge-model <provider>/<model>（写入全局配置，即时生效）",
+            ].join("\n"),
+            "info",
+          );
+          return;
+        }
+        const registry: any = ctx.modelRegistry;
+        try {
+          await registry?.refresh?.();
+        } catch {
+          // Keep the synchronous registry snapshot if a refresh is unavailable.
+        }
+        const models = typeof registry?.getAvailable === "function" ? registry.getAvailable() : [];
+        const choices = [...models]
+          .map((model: any) => `${model.provider}/${model.id}`)
+          .sort((a: string, b: string) => a.localeCompare(b));
+        if (choices.length === 0) {
+          ctx.ui.notify("没有可用模型，无法配置 judge。请先用 /models 或 /login 配置模型。", "error");
+          return;
+        }
+        const selected = await ctx.ui.select("Select judge model", choices);
+        if (!selected) return;
+        const slash = selected.indexOf("/");
+        if (slash <= 0 || slash === selected.length - 1) return;
+        const provider = selected.slice(0, slash);
+        const model = selected.slice(slash + 1);
+        const found = typeof registry?.find === "function" ? registry.find(provider, model) : undefined;
+        if (!found) {
+          ctx.ui.notify(`modelRegistry 中找不到 ${selected}，未写入。`, "error");
+          return;
+        }
+        if (!persistGlobalConfig((raw) => {
+          const judge = (typeof raw.judge === "object" && raw.judge !== null ? raw.judge : {}) as Record<string, unknown>;
+          judge.provider = provider;
+          judge.model = model;
+          raw.judge = judge;
+        })) {
+          ctx.ui.notify(`写入全局配置失败: ${globalConfigFilePath()}`, "error");
+          return;
+        }
+        config.judge = { ...config.judge, provider, model };
+        ctx.ui.notify(`裁判模型已设为 ${selected}（已写入全局配置，即时生效）。`, "info");
         return;
       }
       const slash = value.indexOf("/");

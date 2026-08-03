@@ -191,9 +191,10 @@ export function renderToolCall(
 ): Text {
 	const count = Array.isArray(args.tasks) ? args.tasks.length : 0;
 	return new Text(
-		theme.fg("muted", "·") +
-			theme.fg("toolTitle", "update tasks") +
-			theme.fg("muted", ` ${count} task${count === 1 ? "" : "s"}`),
+		theme.fg("muted", "•") +
+			" " +
+			theme.fg("toolTitle", "Update Tasks") +
+			theme.fg("muted", ` (${count} task${count === 1 ? "" : "s"})`),
 		0,
 		0,
 	);
@@ -227,7 +228,7 @@ export function renderToolResult(
 
 export function renderReadToolCall(theme: Theme): Text {
 	return new Text(
-		theme.fg("muted", "·") + theme.fg("toolTitle", "get tasks"),
+		theme.fg("muted", "•") + " " + theme.fg("toolTitle", "Get Tasks"),
 		0,
 		0,
 	);

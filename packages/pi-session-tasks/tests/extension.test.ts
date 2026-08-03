@@ -189,7 +189,7 @@ test("task tools use compact collapsed rows and reveal results only when expande
 	assert.equal(update.renderShell, "self");
 	assert.deepEqual(
 		update.renderCall({ expected_revision: 0, tasks }, theme, {}).render(80).map((line: string) => line.trimEnd()),
-		["·update tasks 1 task"],
+		["• Update Tasks (1 task)"],
 	);
 	assert.deepEqual(
 		update.renderResult(result, { expanded: false }, theme, {}).render(80),

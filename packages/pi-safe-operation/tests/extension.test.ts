@@ -1540,7 +1540,7 @@ test("config commands persist globally and route adjudication in the same sessio
     assert.equal(saved.permissionMode, "auto");
     assert.deepEqual(saved.judge, { provider: "test-provider", model: "j1" });
     assert.ok(notices.some((n) => /裁判模型已设为 test-provider\/j1/.test(n.message)));
-    assert.ok(notices.some((n) => /已设为 auto/.test(n.message)));
+    assert.ok(notices.some((n) => /permission: auto · judge:/.test(n.message)));
 
     // No session restart: the flagged write goes straight to the judge.
     const confirms: ConfirmRecord[] = [];
@@ -1620,12 +1620,12 @@ test("shift+tab cycles ask → plan → auto → ask with persistence and immedi
     // ask → plan
     await shortcut.handler(ctx);
     assert.equal(savedGlobalConfig(restoreHome.tmpHome).permissionMode, "plan");
-    assert.ok(notices.some((n) => /已设为 plan/.test(n.message) && /ctrl\+alt\+p/.test(n.message)));
+    assert.ok(notices.some((n) => /permission: plan · judge:/.test(n.message)));
 
     // plan → auto
     await shortcut.handler(ctx);
     assert.equal(savedGlobalConfig(restoreHome.tmpHome).permissionMode, "auto");
-    assert.ok(notices.some((n) => /已设为 auto/.test(n.message)));
+    assert.ok(notices.some((n) => /permission: auto · judge:/.test(n.message)));
 
     // In-memory effect without restart: the flagged write goes to the judge.
     const confirms: ConfirmRecord[] = [];
@@ -1637,7 +1637,7 @@ test("shift+tab cycles ask → plan → auto → ask with persistence and immedi
     // auto → ask
     await shortcut.handler(ctx);
     assert.equal(savedGlobalConfig(restoreHome.tmpHome).permissionMode, "ask");
-    assert.ok(notices.some((n) => /已设为 ask/.test(n.message)));
+    assert.ok(notices.some((n) => /permission: ask · judge:/.test(n.message)));
   } finally {
     __setJudgeCompleteForTests(null);
     restoreHome();
