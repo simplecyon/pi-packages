@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import safeOperation, { __setJudgeCompleteForTests } from "../src/index.ts";
+import safeOperation, { __setJudgeCompleteForTests, interactionModeShortcut } from "../src/index.ts";
 
 function createSymlinkOrSkip(t: { skip: (message?: string) => void }, target: string, linkPath: string): boolean {
   try {
@@ -1810,6 +1810,12 @@ test("judge-model command rejects unresolvable models and bad formats without wr
     restoreHome();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test("interaction-mode shortcut uses ctrl+m on macOS and alt+m elsewhere", () => {
+  assert.equal(interactionModeShortcut("darwin"), "ctrl+m");
+  assert.equal(interactionModeShortcut("win32"), "alt+m");
+  assert.equal(interactionModeShortcut("linux"), "alt+m");
 });
 
 test("alt+m cycles chat → plan → accept-edits → auto with persistence", async () => {

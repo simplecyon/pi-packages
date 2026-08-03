@@ -179,6 +179,11 @@ const BASH_REDACTION_OWNER_AVAILABLE = "simplecyon:bash-redaction-owner:availabl
 const TOOL_RUNTIME_APPROVAL_END = "simplecyon:tool-runtime:approval-end";
 const DEFAULT_BASH_TIMEOUT_SECONDS = 30;
 
+/** macOS terminals reserve Alt for Option input; keep the mode cycle reachable. */
+export function interactionModeShortcut(platform = process.platform): "alt+m" | "ctrl+m" {
+  return platform === "darwin" ? "ctrl+m" : "alt+m";
+}
+
 // The judge completion is resolved lazily from the host's pi-ai at runtime (pi's
 // extension loader resolves host modules, as the official custom-compaction
 // example relies on). A non-literal specifier keeps tsc from requiring pi-ai at
@@ -2100,7 +2105,7 @@ export default function (pi: ExtensionAPI) {
     config = loadConfig(ctx.cwd ?? root, ctx.isProjectTrusted?.() ?? true);
   }
 
-  // Shared by /mode, the legacy /permission-mode alias, and alt+m. The global
+  // Shared by /mode, the legacy /permission-mode alias, and the mode shortcut. The global
   // config persists the user-visible interaction mode; legacy permissionMode is
   // read on startup but never written again.
   async function applyInteractionMode(mode: InteractionMode, ctx: any): Promise<void> {
@@ -2122,7 +2127,8 @@ export default function (pi: ExtensionAPI) {
   }
 
   const INTERACTION_MODE_CYCLE: InteractionMode[] = ["chat", "plan", "accept-edits", "auto"];
-  pi.registerShortcut("alt+m", {
+  const modeShortcut = interactionModeShortcut();
+  pi.registerShortcut(modeShortcut, {
     description: "Cycle interaction mode (chat → plan → accept-edits → auto)",
     handler: async (ctx) => {
       refreshRuntimeConfig(ctx);
@@ -2139,7 +2145,7 @@ export default function (pi: ExtensionAPI) {
         [
           `interaction mode: ${config.interactionMode}`,
           `judge: ${config.judge.provider && config.judge.model ? `${config.judge.provider}/${config.judge.model}` : "内置默认候选（按 modelRegistry + auth 解析）"}`,
-          "设置: /mode chat|plan|accept-edits|auto（写入全局配置，本会话即时生效）；alt+m 循环切换。",
+          `设置: /mode chat|plan|accept-edits|auto（写入全局配置，本会话即时生效）；${modeShortcut} 循环切换。`,
         ].join("\n"),
         "info",
       );
