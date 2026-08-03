@@ -1133,13 +1133,15 @@ function withGlobalConfig(config: Record<string, unknown>) {
   const originalHome = process.env.HOME;
   process.env.USERPROFILE = tmpHome;
   process.env.HOME = tmpHome;
-  return () => {
+  const restore = () => {
     if (originalUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = originalUserProfile;
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
     fs.rmSync(tmpHome, { recursive: true, force: true });
   };
+  (restore as any).tmpHome = tmpHome;
+  return restore as (() => void) & { tmpHome: string };
 }
 
 interface ConfirmRecord {
@@ -1467,6 +1469,134 @@ test("project config can raise auditSafeOps but cannot redirect the judge model"
     assert.equal(confirms.length, 0);
   } finally {
     __setJudgeCompleteForTests(null);
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Config commands: /permission-mode and /judge-model
+// ---------------------------------------------------------------------------
+
+function notifyCapturingContext(tmp: string, notices: Array<{ message: string; level: string }>, registry?: unknown) {
+  const base = baseContext(tmp, true);
+  return {
+    ...base,
+    modelRegistry: registry ?? base.modelRegistry,
+    ui: {
+      ...base.ui,
+      notify: (message: string, level: string) => notices.push({ message, level }),
+    },
+  };
+}
+
+function savedGlobalConfig(tmpHome: string): Record<string, unknown> {
+  return JSON.parse(
+    fs.readFileSync(path.join(tmpHome, ".pi", "agent", "safe-operation.json"), "utf8"),
+  ) as Record<string, unknown>;
+}
+
+test("permission-mode command without args shows the current mode and writes nothing", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-cmd-show-"));
+  const restoreHome = withGlobalConfig({});
+  try {
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const command = extension.commands.get("permission-mode") as { handler: (args: unknown, ctx: any) => Promise<void> };
+    assert.ok(command);
+    const notices: Array<{ message: string; level: string }> = [];
+    await command.handler("", notifyCapturingContext(tmp, notices));
+    assert.equal(notices.length, 1);
+    assert.match(notices[0].message, /permission mode: ask/);
+    assert.equal(savedGlobalConfig(restoreHome.tmpHome).permissionMode, undefined);
+  } finally {
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("config commands persist globally and route adjudication in the same session", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-cmd-auto-"));
+  const restoreHome = withGlobalConfig({});
+  const calls = installFakeJudge(async () =>
+    judgeVerdictResponse({ verdict: "allow", riskLevel: "low", rationale: "常规项目文件编辑" }));
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
+    const extension = await loadSafeOperation(tmp);
+    // Session starts on an empty global config: effective mode is the default "ask".
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const { registry } = fakeJudgeRegistry();
+    const notices: Array<{ message: string; level: string }> = [];
+    const cmdCtx = notifyCapturingContext(tmp, notices, registry);
+
+    const judgeCommand = extension.commands.get("judge-model") as { handler: (args: unknown, ctx: any) => Promise<void> };
+    const modeCommand = extension.commands.get("permission-mode") as { handler: (args: unknown, ctx: any) => Promise<void> };
+    assert.ok(judgeCommand);
+    assert.ok(modeCommand);
+    await judgeCommand.handler("test-provider/j1", cmdCtx);
+    await modeCommand.handler("auto", cmdCtx);
+
+    const saved = savedGlobalConfig(restoreHome.tmpHome);
+    assert.equal(saved.permissionMode, "auto");
+    assert.deepEqual(saved.judge, { provider: "test-provider", model: "j1" });
+    assert.ok(notices.some((n) => /裁判模型已设为 test-provider\/j1/.test(n.message)));
+    assert.ok(notices.some((n) => /已设为 auto/.test(n.message)));
+
+    // No session restart: the flagged write goes straight to the judge.
+    const confirms: ConfirmRecord[] = [];
+    const result = await flaggedOverwrite(extension, autoTestContext(tmp, registry, confirms));
+    assert.equal(result, undefined);
+    assert.equal(calls.length, 1);
+    assert.equal((calls[0].model as any).id, "j1");
+    assert.equal(confirms.length, 0);
+  } finally {
+    __setJudgeCompleteForTests(null);
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("permission-mode command rejects an unknown mode without writing", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-cmd-bad-"));
+  const restoreHome = withGlobalConfig({});
+  try {
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const command = extension.commands.get("permission-mode") as { handler: (args: unknown, ctx: any) => Promise<void> };
+    assert.ok(command);
+    const notices: Array<{ message: string; level: string }> = [];
+    await command.handler("yolo", notifyCapturingContext(tmp, notices));
+    assert.equal(notices.length, 1);
+    assert.equal(notices[0].level, "error");
+    assert.match(notices[0].message, /未知 permission mode: yolo/);
+    assert.equal(savedGlobalConfig(restoreHome.tmpHome).permissionMode, undefined);
+  } finally {
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("judge-model command rejects unresolvable models and bad formats without writing", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-cmd-judge-bad-"));
+  const restoreHome = withGlobalConfig({});
+  try {
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const command = extension.commands.get("judge-model") as { handler: (args: unknown, ctx: any) => Promise<void> };
+    assert.ok(command);
+    const { registry } = fakeJudgeRegistry();
+    const notices: Array<{ message: string; level: string }> = [];
+    const cmdCtx = notifyCapturingContext(tmp, notices, registry);
+
+    await command.handler("missing/x", cmdCtx);
+    await command.handler("no-slash", cmdCtx);
+    assert.equal(notices.length, 2);
+    assert.equal(notices[0].level, "error");
+    assert.match(notices[0].message, /找不到 missing\/x/);
+    assert.equal(notices[1].level, "error");
+    assert.match(notices[1].message, /格式/);
+    assert.equal(savedGlobalConfig(restoreHome.tmpHome).judge, undefined);
+  } finally {
     restoreHome();
     fs.rmSync(tmp, { recursive: true, force: true });
   }

@@ -278,6 +278,33 @@ function loadConfig(cwd: string, projectTrusted: boolean): SafeOperationConfig {
   return config;
 }
 
+function globalConfigFilePath(): string {
+  return path.join(os.homedir(), CONFIG_DIR_NAME, "agent", "safe-operation.json");
+}
+
+/**
+ * Read-modify-write the user-level (global) config, preserving unknown keys.
+ * Used by the /permission-mode and /judge-model commands. Writing the global
+ * file raises the user baseline deliberately: these commands are invoked by
+ * the user in the TUI, equivalent to editing the file by hand, so this does
+ * not bypass the project-trust clamp.
+ */
+function persistGlobalConfig(mutate: (raw: Record<string, unknown>) => void): boolean {
+  try {
+    const file = globalConfigFilePath();
+    let raw: Record<string, unknown> = {};
+    if (fs.existsSync(file)) {
+      raw = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+    }
+    mutate(raw);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(raw, null, 2) + "\n");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function normalizeRelative(value: string): string {
   const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "");
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
@@ -1909,17 +1936,109 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerCommand("permission-mode", {
+    description: "Show or set permission mode (ask | plan | auto); persists to the global config",
+    handler: async (args, ctx) => {
+      const value = (args ?? "").trim();
+      if (!value) {
+        ctx.ui.notify(
+          [
+            `permission mode: ${config.permissionMode}`,
+            `judge: ${config.judge.provider && config.judge.model ? `${config.judge.provider}/${config.judge.model}` : "内置默认候选（按 modelRegistry + auth 解析）"}`,
+            "设置: /permission-mode ask|plan|auto（写入全局配置，本会话即时生效）",
+          ].join("\n"),
+          "info",
+        );
+        return;
+      }
+      if (value !== "ask" && value !== "plan" && value !== "auto") {
+        ctx.ui.notify(`未知 permission mode: ${value}。可选: ask | plan | auto`, "error");
+        return;
+      }
+      const mode = value as PermissionMode;
+      if (!persistGlobalConfig((raw) => { raw.permissionMode = mode; })) {
+        ctx.ui.notify(`写入全局配置失败: ${globalConfigFilePath()}`, "error");
+        return;
+      }
+      config.permissionMode = mode;
+      const lines = [`permission mode 已设为 ${mode}（已写入全局配置，本会话即时生效）。`];
+      if (mode === "plan") {
+        lines.push("plan 的只读工具门在会话开始时生效；要立即进入规划阶段请使用 /plan。");
+      }
+      if (mode === "auto") {
+        lines.push(
+          config.judge.provider && config.judge.model
+            ? `裁判模型: ${config.judge.provider}/${config.judge.model}（/judge-model 可修改）。`
+            : "裁判模型: 内置默认候选（按 modelRegistry + auth 解析）；建议用 /judge-model 显式指定。",
+        );
+      }
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
+  });
+
+  pi.registerCommand("judge-model", {
+    description: "Show or set the auto-mode judge model (<provider>/<model>); persists to the global config",
+    handler: async (args, ctx) => {
+      const value = (args ?? "").trim();
+      if (!value) {
+        ctx.ui.notify(
+          [
+            config.judge.provider && config.judge.model
+              ? `judge: ${config.judge.provider}/${config.judge.model}`
+              : "judge: 内置默认候选（按 modelRegistry + auth 解析）",
+            `onFailure: ${config.judge.onFailure} · auditSafeOps: ${config.judge.auditSafeOps ? "on" : "off"}`,
+            "设置: /judge-model <provider>/<model>（写入全局配置，即时生效）",
+          ].join("\n"),
+          "info",
+        );
+        return;
+      }
+      const slash = value.indexOf("/");
+      if (slash <= 0 || slash === value.length - 1) {
+        ctx.ui.notify("格式: /judge-model <provider>/<model>", "error");
+        return;
+      }
+      const provider = value.slice(0, slash);
+      const model = value.slice(slash + 1);
+      const registry: any = (ctx as any).modelRegistry;
+      const found = registry && typeof registry.find === "function" ? registry.find(provider, model) : undefined;
+      if (!found) {
+        ctx.ui.notify(
+          `modelRegistry 中找不到 ${provider}/${model}，未写入。请先用 /models 确认可用的 provider 与模型 id。`,
+          "error",
+        );
+        return;
+      }
+      if (!persistGlobalConfig((raw) => {
+        const judge = (typeof raw.judge === "object" && raw.judge !== null ? raw.judge : {}) as Record<string, unknown>;
+        judge.provider = provider;
+        judge.model = model;
+        raw.judge = judge;
+      })) {
+        ctx.ui.notify(`写入全局配置失败: ${globalConfigFilePath()}`, "error");
+        return;
+      }
+      config.judge = { ...config.judge, provider, model };
+      const authWarning =
+        typeof registry.hasConfiguredAuth === "function" && !registry.hasConfiguredAuth(found)
+          ? "\n警告：该模型没有已配置凭据，裁判调用会 fail-closed；请先配置 API key。"
+          : "";
+      ctx.ui.notify(`裁判模型已设为 ${provider}/${model}（已写入全局配置，即时生效）。${authWarning}`, "info");
+    },
+  });
+
   pi.registerCommand("safe", {
     description: "Show pi-safe-operation status and session counters",
     handler: async (_args, ctx) => {
       ctx.ui.notify(
         [
-          `pi-safe-operation: ${config.mode}`,
+          `pi-safe-operation: ${config.mode} · permission: ${config.permissionMode}`,
           `root: ${root}`,
           `redacted: ${redactedTotal}`,
           `approved: ${approvedTotal}`,
           `blocked/declined: ${blockedTotal}`,
           `recoverable delete: ${config.recoverableDelete ? "enabled" : "disabled"}`,
+          `judge: ${config.judge.provider && config.judge.model ? `${config.judge.provider}/${config.judge.model}` : "default candidates"}`,
         ].join("\n"),
         "info",
       );
