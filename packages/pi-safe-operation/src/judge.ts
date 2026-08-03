@@ -49,7 +49,9 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
   provider: undefined,
   model: undefined,
   maxTokens: 2048,
-  timeoutMs: 20000,
+  // Judge models may need a cold-start window; this remains bounded and can be
+  // lowered per user baseline configuration.
+  timeoutMs: 60000,
   // A judge needs a short structured text response; reasoning budgets can
   // consume small output limits and leave an otherwise successful call empty.
   reasoning: "off",
@@ -354,6 +356,18 @@ export async function judgeAdjudicate(params: {
   deps.announce?.(resolved.id);
   const startedAt = Date.now();
 
+  // One deadline covers the entire adjudication, including a possible
+  // reasoning-off retry. The source operation can cancel it immediately.
+  const timeoutSignal = AbortSignal.timeout(judgeConfig.timeoutMs);
+  const judgeSignal = ctx.signal
+    ? AbortSignal.any([ctx.signal, timeoutSignal])
+    : timeoutSignal;
+  const abortFailure = () => {
+    if (ctx.signal?.aborted) return "judge canceled because the source operation was aborted";
+    if (timeoutSignal.aborted) return `judge timed out after ${judgeConfig.timeoutMs}ms`;
+    return "judge aborted before returning a verdict";
+  };
+
   let responseText = "";
   let lastResponse: any;
   let attempts = 0;
@@ -381,19 +395,21 @@ export async function judgeAdjudicate(params: {
           env: auth.env,
           maxTokens: judgeConfig.maxTokens,
           reasoning,
-          signal: AbortSignal.timeout(judgeConfig.timeoutMs),
+          signal: judgeSignal,
         },
       );
       responseText = extractResponseText(lastResponse);
       if (responseText.trim() || reasoning === "off") break;
     }
   } catch (error) {
+    if (judgeSignal.aborted) return failClosed(abortFailure());
     const reason = error instanceof Error ? error.message : String(error);
     return failClosed(`judge call failed: ${deps.redact(reason)}`);
   }
 
   const latencyMs = Date.now() - startedAt;
   if (!responseText.trim()) {
+    if (judgeSignal.aborted || lastResponse?.stopReason === "aborted") return failClosed(abortFailure());
     const stopReason = typeof lastResponse?.stopReason === "string" ? lastResponse.stopReason : "unknown";
     const errorMessage = typeof lastResponse?.errorMessage === "string"
       ? `; error: ${deps.redact(lastResponse.errorMessage)}`

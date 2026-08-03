@@ -1417,6 +1417,39 @@ test("auto mode fails closed when the judge call fails", async () => {
   }
 });
 
+test("auto judge propagates source cancellation and reports it separately", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-source-abort-"));
+  const restoreHome = withGlobalConfig({
+    permissionMode: "auto",
+    judge: { provider: "test-provider", model: "j1" },
+  });
+  const controller = new AbortController();
+  controller.abort();
+  const calls = installFakeJudge(async (call) => {
+    assert.equal(call.options.signal.aborted, true);
+    throw new Error("This operation was aborted");
+  });
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const confirms: ConfirmRecord[] = [];
+    const { registry } = fakeJudgeRegistry();
+    const result = await flaggedOverwrite(
+      extension,
+      { ...autoTestContext(tmp, registry, confirms), signal: controller.signal },
+    );
+    assert.equal(result?.block, true);
+    assert.equal(calls.length, 1);
+    assert.equal(confirms.length, 0);
+    assert.match(result?.reason ?? "", /source operation was aborted/);
+  } finally {
+    __setJudgeCompleteForTests(null);
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("judge failure blocks even when onFailure is block", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-fail-block-"));
   const restoreHome = withGlobalConfig({
