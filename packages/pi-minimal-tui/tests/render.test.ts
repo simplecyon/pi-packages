@@ -75,7 +75,7 @@ test("completed group renders elapsed time above its aggregate", () => {
 		},
 	);
 
-	assert.deepEqual(component.render(80), ["• Thought for 30s", "⨽ Read 1 file, searched 2 times"]);
+	assert.deepEqual(component.render(80), ["• Thought for 30s", "⨽ Read 1 file, searched 2 times", ""]);
 	assert.equal(formatThoughtDuration(65_000), "1m 5s");
 });
 

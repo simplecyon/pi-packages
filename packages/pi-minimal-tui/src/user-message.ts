@@ -17,9 +17,9 @@ function visuallyBlank(line: string): boolean {
 	return line.replace(ANSI_PATTERN, "").trim().length === 0;
 }
 
-function styleUserMessageLine(line: string): string {
-	if (visuallyBlank(line)) {
-		// padding 行去掉背景色块，变终端背景留白(保留 OSC133 标记)
+function styleUserMessageLine(line: string, padding: boolean): string {
+	if (padding && visuallyBlank(line)) {
+		// 只有组件首尾 padding 行去掉背景；正文内部空行必须保留，避免色块断开。
 		return line.replace(/\x1b\[48;2;\d{1,3};\d{1,3};\d{1,3}m/g, "").replace(/\x1b\[49m/g, "");
 	}
 	const styled = line.replace(
@@ -41,6 +41,6 @@ export function installCompactUserMessageRendering(): void {
 		// 委托 pi core 原版 render(上下 padding + 内容)；
 		// padding 行去背景色变终端背景留白(无底色)，内容行保留 #343541 色块 + > 前缀。
 		const lines = coreRender.call(this, Math.max(1, width - 1));
-		return lines.map(styleUserMessageLine);
+		return lines.map((line, index) => styleUserMessageLine(line, index === 0 || index === lines.length - 1));
 	};
 }

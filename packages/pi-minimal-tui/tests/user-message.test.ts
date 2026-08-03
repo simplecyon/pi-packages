@@ -39,3 +39,15 @@ test("user message keeps padding rows as bg-less whitespace around a colored con
 	assert.equal(lines[2]?.replace(ANSI_PATTERN, "").trim().length, 0);
 	assert.ok(!lines[2]?.includes("\x1b[48;"));
 });
+
+test("user message keeps the background across internal blank lines", () => {
+	initTheme("dark");
+	installCompactUserMessageRendering();
+	const lines = new UserMessageComponent("first\n\nthird").render(48);
+
+	const contentLines = lines.filter((line) => line.includes("\x1b[48;2;52;53;65m"));
+	assert.equal(contentLines.length, 3);
+	assert.ok(contentLines[0]?.includes("first"));
+	assert.equal(contentLines[1]?.replace(ANSI_PATTERN, "").trim(), ">");
+	assert.ok(contentLines[2]?.includes("third"));
+});
