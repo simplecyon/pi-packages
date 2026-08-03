@@ -125,7 +125,12 @@ export class AskUserQuestionDialog {
 	}
 
 	private saveOther(value: string): void {
-		if (!value) return;
+		if (!value) {
+			this.inputMode = false;
+			this.editor.focused = false;
+			this.refresh();
+			return;
+		}
 		this.inputMode = false;
 		this.editor.setText("");
 		if (!this.question().multiSelect) {
@@ -139,7 +144,7 @@ export class AskUserQuestionDialog {
 			selectedLabels: previous?.selectedLabels ?? [],
 			customText: value,
 		});
-		this.refresh();
+		this.moveToNext();
 	}
 
 	private submit(): void {
