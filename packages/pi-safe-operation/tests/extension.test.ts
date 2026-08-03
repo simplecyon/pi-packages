@@ -1762,24 +1762,36 @@ test("a live session refreshes the globally selected judge before cycling into a
   }
 });
 
-test("judge-model picker identifies the current configured model", async () => {
+test("judge-model picker awaits the model registry and persists its selection", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-picker-current-"));
   const restoreHome = withGlobalConfig({ judge: { provider: "test-provider", model: "j1" } });
   try {
     const extension = await loadSafeOperation(tmp);
     const { registry } = fakeJudgeRegistry();
-    (registry as any).getAvailable = () => [
+    (registry as any).getAvailable = async () => [
       { provider: "test-provider", id: "j1" },
       { provider: "test-provider", id: "j2" },
     ];
+    (registry as any).find = (provider: string, id: string) =>
+      provider === "test-provider" && (id === "j1" || id === "j2") ? { provider, id } : undefined;
     await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
     const command = extension.commands.get("judge-model") as { handler: (args: unknown, ctx: any) => Promise<void> };
     let title = "";
+    let choices: string[] = [];
     await command.handler("", {
       ...notifyCapturingContext(tmp, [], registry),
-      ui: { ...baseContext(tmp, true).ui, select: async (nextTitle: string) => { title = nextTitle; return undefined; } },
+      ui: {
+        ...baseContext(tmp, true).ui,
+        select: async (nextTitle: string, nextChoices: string[]) => {
+          title = nextTitle;
+          choices = nextChoices;
+          return "test-provider/j2";
+        },
+      },
     });
     assert.match(title, /current: test-provider\/j1/);
+    assert.deepEqual(choices, ["test-provider/j1", "test-provider/j2"]);
+    assert.deepEqual(savedGlobalConfig(restoreHome.tmpHome).judge, { provider: "test-provider", model: "j2" });
   } finally {
     restoreHome();
     fs.rmSync(tmp, { recursive: true, force: true });

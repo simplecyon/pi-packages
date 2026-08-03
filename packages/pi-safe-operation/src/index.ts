@@ -2192,7 +2192,16 @@ export default function (pi: ExtensionAPI) {
         } catch {
           // Keep the synchronous registry snapshot if a refresh is unavailable.
         }
-        const models = typeof registry?.getAvailable === "function" ? registry.getAvailable() : [];
+        let models: any[] = [];
+        try {
+          const available = typeof registry?.getAvailable === "function"
+            ? await registry.getAvailable()
+            : [];
+          models = Array.isArray(available) ? available : [];
+        } catch {
+          ctx.ui.notify("无法读取可用模型，未打开 judge selector。请检查 /models 或 provider 登录状态。", "error");
+          return;
+        }
         const currentJudge = config.judge.provider && config.judge.model
           ? `${config.judge.provider}/${config.judge.model}`
           : undefined;
