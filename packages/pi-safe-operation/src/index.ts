@@ -2285,5 +2285,8 @@ export default function (pi: ExtensionAPI) {
   // keep their registration order ahead of permission-mode's handlers: config
   // must be loaded before permission-mode reads getPermissionMode(), and the
   // egress redaction pass stays the first context transform.
-  const planMode = setupPermissionMode(pi, { getPermissionMode: () => config.permissionMode });
+  const planMode = setupPermissionMode(pi, {
+    getPermissionMode: () => config.permissionMode,
+    setPermissionMode: applyPermissionMode,
+  });
 }

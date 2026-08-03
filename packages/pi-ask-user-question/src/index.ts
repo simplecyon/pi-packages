@@ -33,6 +33,15 @@ const QuestionSchema = Type.Object(
 	},
 	{ additionalProperties: false },
 );
+export const ASK_USER_QUESTION_REQUEST_EVENT = "simplecyon:ask-user-question:request";
+
+interface AskUserQuestionRequest {
+	ctx: ExtensionContext;
+	questions: Question[];
+	handled?: boolean;
+	resolve: (result: DialogResult) => void;
+}
+
 const Parameters = Type.Object(
 	{
 		questions: Type.Array(QuestionSchema, {
@@ -105,6 +114,27 @@ async function askSingleRPC(
 }
 
 export default function askUserQuestionExtension(pi: ExtensionAPI): void {
+	pi.events.on(ASK_USER_QUESTION_REQUEST_EVENT, (data) => {
+		if (!data || typeof data !== "object") return;
+		const request = data as AskUserQuestionRequest;
+		if (!request.ctx?.hasUI || !Array.isArray(request.questions) || typeof request.resolve !== "function") return;
+		request.handled = true;
+		void (async () => {
+			const token = `ask-user-question-${Date.now()}`;
+			pi.events.emit(EXCLUSIVE_UI_CHANNEL, { action: "acquire", token, source: "AskUserQuestion" });
+			request.ctx.ui.setWorkingVisible(false);
+			try {
+				const result = await request.ctx.ui.custom<DialogResult>((tui, theme, _keybindings, done) =>
+					new AskUserQuestionDialog(request.questions, tui, theme, done),
+				);
+				request.resolve(result);
+			} finally {
+				request.ctx.ui.setWorkingVisible(true);
+				pi.events.emit(EXCLUSIVE_UI_CHANNEL, { action: "release", token, source: "AskUserQuestion" });
+			}
+		})();
+	});
+
 	pi.registerTool({
 		name: "AskUserQuestion",
 		label: "Ask User Question",

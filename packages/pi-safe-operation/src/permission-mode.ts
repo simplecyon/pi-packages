@@ -22,6 +22,10 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 export type PermissionMode = "ask" | "plan" | "auto";
 
+const ASK_USER_QUESTION_REQUEST_EVENT = "simplecyon:ask-user-question:request";
+const TASKS_AVAILABLE_EVENT = "simplecyon:session-tasks:available";
+const TASKS_SYNC_EVENT = "simplecyon:session-tasks:sync";
+
 // ---------------------------------------------------------------------------
 // Plan extraction and command allowlist
 // (ported from pi examples/extensions/plan-mode/utils.ts)
@@ -258,12 +262,33 @@ function uniqueToolNames(toolNames: string[]): string[] {
 
 export function setupPermissionMode(
   pi: ExtensionAPI,
-  opts: { getPermissionMode: () => PermissionMode },
+  opts: {
+    getPermissionMode: () => PermissionMode;
+    setPermissionMode?: (mode: PermissionMode, ctx: ExtensionContext) => Promise<void>;
+  },
 ): PlanModeController {
   let planModeEnabled = false;
   let executionMode = false;
   let todoItems: TodoItem[] = [];
   let toolsBeforePlanMode: string[] | undefined;
+  let taskExtensionAvailable = false;
+
+  pi.events.on(TASKS_AVAILABLE_EVENT, () => {
+    taskExtensionAvailable = true;
+    syncTaskExtension();
+  });
+
+  function syncTaskExtension(): void {
+    if (!taskExtensionAvailable) return;
+    const firstPending = todoItems.find((todo) => !todo.completed)?.step;
+    pi.events.emit(TASKS_SYNC_EVENT, {
+      tasks: todoItems.map((todo) => ({
+        id: `plan-${todo.step}`,
+        title: todo.text,
+        status: todo.completed ? "completed" : todo.step === firstPending ? "in_progress" : "pending",
+      })),
+    });
+  }
 
   pi.registerFlag("plan", {
     description: "Start in plan mode (read-only exploration)",
@@ -272,6 +297,12 @@ export function setupPermissionMode(
   });
 
   function updateStatus(ctx: ExtensionContext): void {
+    if (taskExtensionAvailable) {
+      ctx.ui.setStatus("safe-operation-plan", undefined);
+      ctx.ui.setWidget("safe-operation-plan-todos", undefined);
+      syncTaskExtension();
+      return;
+    }
     if (executionMode && todoItems.length > 0) {
       const completed = todoItems.filter((todo) => todo.completed).length;
       ctx.ui.setStatus("safe-operation-plan", ctx.ui.theme.fg("accent", `📋 ${completed}/${todoItems.length}`));
@@ -459,6 +490,40 @@ After completing a step, include a [DONE:n] tag in your response.`,
     persistState();
   });
 
+  async function askPlanDecision(ctx: ExtensionContext): Promise<string | undefined> {
+    const options = [
+      {
+        label: "Execute in Auto mode",
+        description: "Let the judge model approve flagged actions automatically while the plan runs.",
+      },
+      {
+        label: "Execute this plan",
+        description: "Run the approved steps with the normal permission checks and confirmations.",
+      },
+      {
+        label: "Chat about this plan",
+        description: "Discuss or revise the plan before making any changes.",
+      },
+    ];
+    let answerResolve: ((value: any) => void) | undefined;
+    const answer = new Promise<any>((resolve) => { answerResolve = resolve; });
+    const request: any = {
+      ctx,
+      questions: [{
+        header: "Plan",
+        question: "The plan is ready. What would you like to do next?",
+        options,
+      }],
+      resolve: answerResolve,
+    };
+    pi.events.emit(ASK_USER_QUESTION_REQUEST_EVENT, request);
+    if (request.handled) {
+      const result = await answer;
+      return result.answers?.[0]?.selectedLabels?.[0];
+    }
+    return ctx.ui.select("Plan ready - what next?", options.map((option) => option.label));
+  }
+
   // Approval gate at the end of a planning turn; completion detection during execution.
   pi.on("agent_end", async (event, ctx) => {
     if (executionMode && todoItems.length > 0) {
@@ -489,11 +554,8 @@ After completing a step, include a [DONE:n] tag in your response.`,
     if (todoItems.length === 0) return;
     persistState();
 
-    const choice = await ctx.ui.select("Plan mode - what next?", [
-      "Execute the plan (track progress)",
-      "Stay in plan mode",
-      "Refine the plan",
-    ]);
+    updateStatus(ctx);
+    const choice = await askPlanDecision(ctx);
 
     const todoListText = todoItems.map((todo, i) => `${i + 1}. ☐ ${todo.text}`).join("\n");
     const planTodoListMessage = {
@@ -502,7 +564,10 @@ After completing a step, include a [DONE:n] tag in your response.`,
       display: true,
     };
 
-    if (choice?.startsWith("Execute")) {
+    if (choice === "Execute in Auto mode" || choice === "Execute this plan" || choice === "Execute the plan (track progress)") {
+      if (choice === "Execute in Auto mode") {
+        await opts.setPermissionMode?.("auto", ctx);
+      }
       const firstTodoItem = todoItems[0];
       if (!firstTodoItem) return;
 
@@ -525,8 +590,8 @@ After completing a step, include a [DONE:n] tag in your response.`;
         { customType: EXECUTE_TYPE, content: execMessage, display: true },
         { triggerTurn: true, deliverAs: "followUp" },
       );
-    } else if (choice === "Refine the plan") {
-      const refinement = await ctx.ui.editor("Refine the plan:", "");
+    } else if (choice === "Chat about this plan") {
+      const refinement = await ctx.ui.editor("Chat about this plan:", "");
       if (refinement?.trim()) {
         pi.sendMessage(planTodoListMessage, { deliverAs: "followUp" });
         pi.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });

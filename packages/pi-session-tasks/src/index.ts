@@ -34,6 +34,8 @@ const READ_TOOL_NAME = "get_tasks";
 const WIDGET_KEY = "session-tasks";
 const UI_ENTRY_TYPE = "session-tasks-ui";
 const EXCLUSIVE_UI_CHANNEL = "simplecyon:ui-exclusive";
+const TASKS_AVAILABLE_EVENT = "simplecyon:session-tasks:available";
+const TASKS_SYNC_EVENT = "simplecyon:session-tasks:sync";
 
 interface ExclusiveUIEvent {
 	action: "acquire" | "release";
@@ -105,6 +107,14 @@ function isDismissEntryData(value: unknown): value is DismissEntryData {
 	);
 }
 
+function isTaskSyncEvent(value: unknown): value is { tasks: Task[] } {
+	if (!value || typeof value !== "object" || !Array.isArray((value as any).tasks)) return false;
+	return (value as any).tasks.every(
+		(task: any) => task && typeof task.id === "string" && typeof task.title === "string" &&
+			(task.status === "pending" || task.status === "in_progress" || task.status === "completed"),
+	);
+}
+
 function completedCount(tasks: readonly Task[]): number {
 	return tasks.filter((task) => task.status === "completed").length;
 }
@@ -134,6 +144,22 @@ export default function sessionTasksExtension(pi: ExtensionAPI): void {
 	let updateQueue: Promise<void> = Promise.resolve();
 	const exclusiveUITokens = new Set<string>();
 	let latestUIContext: ExtensionContext | undefined;
+
+	pi.events.on(TASKS_SYNC_EVENT, (data) => {
+		if (!isTaskSyncEvent(data)) return;
+		try {
+			validateTaskList(data.tasks);
+		} catch {
+			return;
+		}
+		currentSnapshot = {
+			revision: (currentSnapshot?.revision ?? 0) + 1,
+			tasks: cloneTasks(data.tasks),
+		};
+		dismissedRevision = undefined;
+		if (latestUIContext) renderTaskUI(latestUIContext);
+	});
+	pi.events.emit(TASKS_AVAILABLE_EVENT, { source: "pi-session-tasks" });
 
 	function currentUIState() {
 		return deriveTaskUIState(currentSnapshot, sessionPhase, dismissedRevision);
@@ -366,12 +392,14 @@ export default function sessionTasksExtension(pi: ExtensionAPI): void {
 		sessionPhase = "settled";
 		reconstructState(ctx);
 		renderTaskUI(ctx);
+		pi.events.emit(TASKS_AVAILABLE_EVENT, { source: "pi-session-tasks" });
 	});
 
 	pi.on("session_tree", async (_event, ctx) => {
 		sessionPhase = "settled";
 		reconstructState(ctx);
 		renderTaskUI(ctx);
+		pi.events.emit(TASKS_AVAILABLE_EVENT, { source: "pi-session-tasks" });
 	});
 
 	pi.on("agent_start", async (_event, ctx) => {
