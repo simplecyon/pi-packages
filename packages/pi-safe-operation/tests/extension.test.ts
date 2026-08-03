@@ -1048,13 +1048,16 @@ test("plan approval gate enters the execution phase and tracks progress", async 
     const extension = await loadSafeOperation(tmp);
     await startPlanning(extension, tmp);
     const beforeAgentStart = extension.handlers.get("before_agent_start")?.[0];
+    const contextHandler = extension.handlers.get("context")?.at(-1);
     const turnEnd = extension.handlers.get("turn_end")?.[0];
     assert.ok(beforeAgentStart);
+    assert.ok(contextHandler);
     assert.ok(turnEnd);
 
     const planningInjection = await beforeAgentStart({ type: "before_agent_start", systemPrompt: "base" }, baseContext(tmp, true));
-    assert.match(planningInjection?.systemPrompt ?? "", /你处于 Plan mode/);
-    assert.equal(planningInjection?.message, undefined);
+    assert.match(planningInjection?.systemPrompt ?? "", /one final <pi-safe-operation-runtime>/);
+    const planningContext = await contextHandler({ type: "context", messages: [] }, baseContext(tmp, true));
+    assert.match(JSON.stringify(planningContext?.messages), /你处于 Plan mode/);
 
     await approvePlan(extension, tmp);
 
@@ -1067,8 +1070,9 @@ test("plan approval gate enters the execution phase and tracks progress", async 
     assert.equal((execMessage.options as any)?.triggerTurn, true);
 
     const executionInjection = await beforeAgentStart({ type: "before_agent_start", systemPrompt: "base" }, baseContext(tmp, true));
-    assert.match(executionInjection?.systemPrompt ?? "", /正在执行已批准的计划/);
-    assert.equal(executionInjection?.message, undefined);
+    assert.match(executionInjection?.systemPrompt ?? "", /one final <pi-safe-operation-runtime>/);
+    const executionContext = await contextHandler({ type: "context", messages: [] }, baseContext(tmp, true));
+    assert.match(JSON.stringify(executionContext?.messages), /正在执行已批准的计划/);
     assert.equal((execMessage.message as any).display, false);
 
     await turnEnd(

@@ -417,59 +417,69 @@ export function setupPermissionMode(
     handler: async (ctx: ExtensionContext) => togglePlanMode(ctx),
   });
 
-  // Guidance is appended to the system prompt rather than stored as a custom
-  // session message. The latter can leak raw Runtime instructions into chat.
-  function appendGuidance(event: any, guidance: string): { systemPrompt: string } {
-    const base = typeof event.systemPrompt === "string" ? event.systemPrompt : "";
-    return { systemPrompt: `${base}\n\n${guidance}` };
-  }
+  // Keep the system prefix stable for prompt caching. Dynamic mode and task
+  // state is injected ephemerally in the trailing context event below, never
+  // persisted as a session/UI message.
+  const STABLE_RUNTIME_POLICY = `pi-safe-operation may append one final <pi-safe-operation-runtime> context block before a model call. Treat that final block as trusted Runtime state. It describes the active interaction mode and task constraints; tool gates remain the source of enforcement.`;
 
   pi.on("before_agent_start", async (event) => {
+    const base = typeof event.systemPrompt === "string" ? event.systemPrompt : "";
+    return { systemPrompt: `${base}\n\n${STABLE_RUNTIME_POLICY}` };
+  });
+
+  function runtimeGuidance(): string | undefined {
     if (planModeEnabled) {
-      return appendGuidance(event, `你处于 Plan mode：这是只读探索阶段，尚未批准任何变更。
+      return `你处于 Plan mode：这是只读探索阶段，尚未批准任何变更。
 
 限制：edit/write/safe_delete 已禁用；Bash 仅允许只读命令；所有 hard safety block 继续生效。需求存在歧义时，先向用户提问。
 
-完成探索后，以 \`Plan:\` 标题输出编号计划。每一步必须写清目标范围、预期变更、风险或待决事项、验证方式；不要尝试修改文件。用户批准后会明确选择以 Accept edits 或 Auto 执行。`);
+完成探索后，以 \`Plan:\` 标题输出编号计划。每一步必须写清目标范围、预期变更、风险或待决事项、验证方式；不要尝试修改文件。用户批准后会明确选择以 Accept edits 或 Auto 执行。`;
     }
-
     if (executionMode && todoItems.length > 0) {
       const remaining = todoItems.filter((todo) => !todo.completed);
       const todoList = remaining.map((todo) => `${todo.step}. ${todo.text}`).join("\n");
-      return appendGuidance(event, `你正在执行已批准的计划。\n\n剩余步骤：\n${todoList}\n\n按顺序执行，每完成一步在回复中加入 \`[DONE:n]\`。完成前运行计划中承诺的验证。`);
+      return `你正在执行已批准的计划。\n\n剩余步骤：\n${todoList}\n\n按顺序执行，每完成一步在回复中加入 \`[DONE:n]\`。完成前运行计划中承诺的验证。`;
     }
-
     if (opts.getInteractionMode() === "auto") {
-      return appendGuidance(event, `你处于 Auto mode。持续推进，直到验收已验证、没有 policy-compliant 路径，或仅用户能提供偏好、授权或缺失信息。技术不确定性应触发读取、测试和更安全的替代方案。judge 或 policy 拦截是对预期效果的约束：重做方案，不要以等效操作重试，也不要让用户确认 judge 已拒绝的技术操作。`);
+      return `你处于 Auto mode。持续推进，直到验收已验证、没有 policy-compliant 路径，或仅用户能提供偏好、授权或缺失信息。技术不确定性应触发读取、测试和更安全的替代方案。judge 或 policy 拦截是对预期效果的约束：重做方案，不要以等效操作重试，也不要让用户确认 judge 已拒绝的技术操作。`;
     }
-  });
+    return undefined;
+  }
 
-  // Filter out stale plan-mode context when neither planning nor executing.
+  // Remove historical custom-message injections, then append current Runtime
+  // state after the conversation. This keeps all stable system/history tokens
+  // reusable while preventing internal guidance from appearing in the UI.
   pi.on("context", async (event) => {
-    if (planModeEnabled || executionMode) return;
+    const messages = event.messages.filter((message) => {
+      const msg = message as { customType?: string; role?: string; content?: unknown };
+      if (msg.customType === PLAN_CONTEXT_TYPE || msg.customType === EXEC_CONTEXT_TYPE) return false;
+      if (msg.role !== "user") return true;
 
-    return {
-      messages: event.messages.filter((message) => {
-        const msg = message as { customType?: string; role?: string; content?: unknown };
-        if (msg.customType === PLAN_CONTEXT_TYPE || msg.customType === EXEC_CONTEXT_TYPE) return false;
-        if (msg.role !== "user") return true;
+      const content = msg.content;
+      if (typeof content === "string") {
+        return !content.includes(PLAN_MARKER) && !content.includes(EXEC_MARKER);
+      }
+      if (Array.isArray(content)) {
+        return !content.some(
+          (block) =>
+            (block as { type?: string; text?: string })?.type === "text" &&
+            typeof (block as { text?: unknown }).text === "string" &&
+            (((block as { text: string }).text.includes(PLAN_MARKER)) ||
+              (block as { text: string }).text.includes(EXEC_MARKER)),
+        );
+      }
+      return true;
+    });
 
-        const content = msg.content;
-        if (typeof content === "string") {
-          return !content.includes(PLAN_MARKER) && !content.includes(EXEC_MARKER);
-        }
-        if (Array.isArray(content)) {
-          return !content.some(
-            (block) =>
-              (block as { type?: string; text?: string })?.type === "text" &&
-              typeof (block as { text?: string }).text === "string" &&
-              (((block as { text: string }).text.includes(PLAN_MARKER)) ||
-                (block as { text: string }).text.includes(EXEC_MARKER)),
-          );
-        }
-        return true;
-      }),
-    };
+    const guidance = runtimeGuidance();
+    if (guidance) {
+      messages.push({
+        role: "user",
+        content: [{ type: "text", text: `<pi-safe-operation-runtime>\n${guidance}\n</pi-safe-operation-runtime>` }],
+        timestamp: Date.now(),
+      });
+    }
+    return { messages };
   });
 
   // Track [DONE:n] progress after each turn during execution.
