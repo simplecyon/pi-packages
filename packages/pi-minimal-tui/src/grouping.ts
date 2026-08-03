@@ -7,6 +7,7 @@ export interface GroupView {
 	summary?: ToolSummary;
 	marker?: "middle" | "last";
 	elapsedMs?: number;
+	separateFromMessage?: boolean;
 }
 
 interface ActionRecord {
@@ -19,6 +20,7 @@ interface ActionRecord {
 interface BoundaryRecord {
 	kind: "boundary";
 	elapsedMs?: number;
+	separateFromMessage?: boolean;
 }
 
 type SequenceRecord = ActionRecord | BoundaryRecord;
@@ -50,7 +52,8 @@ function sameView(left: GroupView | undefined, right: GroupView | undefined): bo
 		left?.summary?.verb === right?.summary?.verb &&
 		left?.summary?.detail === right?.summary?.detail &&
 		left?.marker === right?.marker &&
-		left?.elapsedMs === right?.elapsedMs
+		left?.elapsedMs === right?.elapsedMs &&
+		left?.separateFromMessage === right?.separateFromMessage
 	);
 }
 
@@ -119,10 +122,14 @@ export class ActionGroupCoordinator {
 		return this.lastTurn;
 	}
 
-	addBoundary(): void {
-		if (this.sequence.at(-1)?.kind !== "boundary") {
-			this.sequence.push({ kind: "boundary" });
+	addBoundary(separateFromMessage = false): void {
+		const last = this.sequence.at(-1);
+		if (last?.kind === "boundary") {
+			last.separateFromMessage ||= separateFromMessage;
+		} else {
+			this.sequence.push({ kind: "boundary", separateFromMessage });
 		}
+		this.recompute();
 	}
 
 	startAgent(startedAt = Date.now()): void {
@@ -163,7 +170,7 @@ export class ActionGroupCoordinator {
 	recordMessage(message: unknown): void {
 		const role = messageRole(message);
 		if (role === "user") {
-			this.addBoundary();
+			this.addBoundary(true);
 			return;
 		}
 		if (role === "toolResult") {
@@ -181,7 +188,7 @@ export class ActionGroupCoordinator {
 				const name = stringField(block, "name", "toolName");
 				if (id && name) this.recordTool(id, name);
 			} else if (hasVisibleAssistantContent(block)) {
-				this.addBoundary();
+				this.addBoundary(true);
 			}
 		}
 	}
@@ -234,8 +241,9 @@ export class ActionGroupCoordinator {
 	private recompute(): void {
 		const nextViews = new Map<string, GroupView>();
 		let group: ActionRecord[] = [];
+		let lastActionId: string | undefined;
 
-		const flushFinal = (elapsedMs?: number) => {
+		const flushFinal = (elapsedMs?: number, separateFromMessage = false) => {
 			const summary = formatGroupedSummary(group.map((action) => action.name));
 			for (let index = 0; index < group.length; index += 1) {
 				const action = group[index];
@@ -244,6 +252,7 @@ export class ActionGroupCoordinator {
 					hidden: Boolean(summary) && index < group.length - 1,
 					summary: summary && index === group.length - 1 ? summary : undefined,
 				};
+				if (index === group.length - 1 && separateFromMessage) view.separateFromMessage = true;
 				if (elapsedMs !== undefined && index === group.length - 1) {
 					view.marker = "last";
 					view.elapsedMs = elapsedMs;
@@ -255,12 +264,19 @@ export class ActionGroupCoordinator {
 
 		for (const record of this.sequence) {
 			if (record.kind === "boundary") {
-				flushFinal(record.elapsedMs);
+				const hadGroup = group.length > 0;
+				flushFinal(record.elapsedMs, record.separateFromMessage);
+				if (!hadGroup && record.separateFromMessage && lastActionId) {
+					const view = nextViews.get(lastActionId);
+					if (view) view.separateFromMessage = true;
+				}
 			} else if (!GROUPABLE_TOOLS.has(record.name) || record.isError) {
 				flushFinal();
 				nextViews.set(record.id, { hidden: false });
+				lastActionId = record.id;
 			} else {
 				group.push(record);
+				lastActionId = record.id;
 			}
 		}
 		if (this.agentStartedAt === undefined) {

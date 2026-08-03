@@ -193,7 +193,7 @@ export default function minimalTuiExtension(pi: ExtensionAPI): void {
 		grouping.rebuild(context.sessionManager.getBranch());
 	});
 	pi.on("message_start", (event) => {
-		if (event.message.role === "user") grouping.addBoundary();
+		if (event.message.role === "user") grouping.addBoundary(true);
 	});
 	pi.on("agent_start", () => {
 		grouping.startAgent();

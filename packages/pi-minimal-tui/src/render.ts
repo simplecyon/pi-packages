@@ -173,10 +173,10 @@ export class MinimalToolCallComponent implements Component {
 						),
 					];
 		lines.push(summaryLine(summary, this.theme, width, this.options.outcome, groupView?.marker));
-		// ToolExecutionComponent supplies a leading spacer, but adjacent assistant
-		// messages do not get one. Keep the completed aggregate visually separated
-		// from the message that follows it.
-		if (!this.expanded && groupView?.summary && groupView.elapsedMs !== undefined) lines.push("");
+		// ToolExecutionComponent supplies a leading spacer, but adjacent messages
+		// do not get one. Add a trailing spacer only at a message boundary, so
+		// consecutive action events do not acquire extra blank rows.
+		if (!this.expanded && groupView?.separateFromMessage) lines.push("");
 		if ((!this.expanded && !this.options.showInnerCollapsed) || !this.inner || width <= 0) return lines;
 
 		const rendered = trimEmptyEdges(this.inner.render(Math.max(1, width - 2)).map(stripBackgroundAnsi));

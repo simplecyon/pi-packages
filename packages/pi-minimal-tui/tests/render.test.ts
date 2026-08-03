@@ -47,6 +47,17 @@ test("collapsed call renders one compact event row", () => {
 	assert.deepEqual(component.render(80), ["• Read (extensions.md)"]);
 });
 
+test("auto approval follows the action row", () => {
+	const component = new MinimalToolCallComponent(
+		{ verb: "Edit", detail: "runtime-context.ts" },
+		undefined,
+		false,
+		theme,
+		{ approval: () => "auto approved" },
+	);
+	assert.deepEqual(component.render(80), ["• Edit (runtime-context.ts)", "- auto approved"]);
+});
+
 test("running group rows use branch markers", () => {
 	const middle = new MinimalToolCallComponent({ verb: "Read", detail: "Layout.tsx" }, undefined, false, theme, {
 		getGroupView: () => ({ hidden: false, marker: "middle" }),
@@ -71,6 +82,7 @@ test("completed group renders elapsed time above its aggregate", () => {
 				summary: { verb: "Read 1 file, searched 2 times" },
 				marker: "last",
 				elapsedMs: 30_000,
+				separateFromMessage: true,
 			}),
 		},
 	);

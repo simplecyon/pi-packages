@@ -81,6 +81,21 @@ test("completion keeps elapsed time when final assistant text already closed the
 	assert.equal(grouping.getView("call-grep")?.marker, "last");
 });
 
+test("message boundaries mark the final action for visual separation", () => {
+	const grouped = new ActionGroupCoordinator();
+	grouped.recordTool("call-1", "bash");
+	grouped.recordTool("call-2", "read");
+	grouped.recordMessage({ role: "assistant", content: [{ type: "text", text: "done" }] });
+
+	assert.equal(grouped.getView("call-1")?.separateFromMessage, undefined);
+	assert.equal(grouped.getView("call-2")?.separateFromMessage, true);
+
+	const single = new ActionGroupCoordinator();
+	single.recordTool("call-edit", "edit");
+	single.recordMessage({ role: "assistant", content: [{ type: "text", text: "done" }] });
+	assert.equal(single.getView("call-edit")?.separateFromMessage, true);
+});
+
 test("boundaries and errors split action groups", () => {
 	const grouping = new ActionGroupCoordinator();
 	grouping.recordTool("call-1", "bash");
