@@ -53,9 +53,9 @@ test("auto approval follows the action row", () => {
 		undefined,
 		false,
 		theme,
-		{ approval: () => "auto approved" },
+		{ approval: () => "Auto approved" },
 	);
-	assert.deepEqual(component.render(80), ["• Edit (runtime-context.ts)", "- auto approved"]);
+	assert.deepEqual(component.render(80), ["• Edit (runtime-context.ts)", "⨽ Auto approved"]);
 });
 
 test("running group rows use branch markers", () => {
@@ -146,10 +146,11 @@ test("edit calls can keep diff details visible while collapsed", () => {
 		new StaticComponent(["edit src/index.ts", "", " 1 -const oldValue = 1;", " 1 +const newValue = 2;"]),
 		false,
 		theme,
-		{ showInnerCollapsed: true },
+		{ showInnerCollapsed: true, approval: () => "Auto approved" },
 	);
 	assert.deepEqual(component.render(80), [
 		"• Edit (index.ts)",
+		"⨽ Auto approved",
 		"   1 -const oldValue = 1;",
 		"   1 +const newValue = 2;",
 	]);

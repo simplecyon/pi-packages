@@ -1602,7 +1602,7 @@ test("judge-model command rejects unresolvable models and bad formats without wr
   }
 });
 
-test("shift+tab cycles ask → plan → auto → ask with persistence and immediate effect", async () => {
+test("alt+m cycles ask → plan → auto → ask with persistence and immediate effect", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-shortcut-cycle-"));
   const restoreHome = withGlobalConfig({ judge: { provider: "test-provider", model: "j1" } });
   const calls = installFakeJudge(async () =>
@@ -1611,7 +1611,7 @@ test("shift+tab cycles ask → plan → auto → ask with persistence and immedi
     fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
     const extension = await loadSafeOperation(tmp);
     await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
-    const shortcut = extension.shortcuts.get("shift+tab") as { handler: (ctx: any) => Promise<void> };
+    const shortcut = extension.shortcuts.get("alt+m") as { handler: (ctx: any) => Promise<void> };
     assert.ok(shortcut);
     const { registry } = fakeJudgeRegistry();
     const notices: Array<{ message: string; level: string }> = [];

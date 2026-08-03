@@ -34,6 +34,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
+const SAFE_DECISION_EVENT = "simplecyon:safe-operation:decision";
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
 
 function visibleWidth(text: string): number {
@@ -804,6 +805,7 @@ export default function (pi: ExtensionAPI) {
   let redactedTotal = 0;
   let blockedTotal = 0;
   let approvedTotal = 0;
+  let autoApprovedTotal = 0;
   let judgeAnnounced = false;
   let externalBashRedactionOwner = false;
   let standaloneBashRegistered = false;
@@ -1085,6 +1087,12 @@ export default function (pi: ExtensionAPI) {
             interactiveConfirm(ctx, confirmTitle, confirmMessage, auditData, runtime),
           countApproved: () => {
             approvedTotal += 1;
+            autoApprovedTotal += 1;
+            pi.events.emit(SAFE_DECISION_EVENT, {
+              toolCallId: runtime.toolCallId,
+              decision: "auto-approved",
+            });
+            updatePermissionModeStatus(ctx);
           },
           countBlocked: () => {
             blockedTotal += 1;
@@ -1206,7 +1214,9 @@ export default function (pi: ExtensionAPI) {
 
   function updatePermissionModeStatus(ctx: any): void {
     if (!ctx.hasUI || typeof ctx.ui?.setStatus !== "function") return;
-    const text = `permission: ${config.permissionMode}`;
+    const text = config.permissionMode === "auto"
+      ? `permission: auto · auto ✓${autoApprovedTotal}`
+      : `permission: ${config.permissionMode}`;
     ctx.ui.setStatus(
       "permission-mode",
       typeof ctx.ui.theme?.fg === "function" ? ctx.ui.theme.fg("accent", text) : text,
@@ -1219,6 +1229,7 @@ export default function (pi: ExtensionAPI) {
     redactedTotal = 0;
     blockedTotal = 0;
     approvedTotal = 0;
+    autoApprovedTotal = 0;
     config = loadConfig(root, ctx.isProjectTrusted());
     judgeAnnounced = false;
     permissionFooterInstalled = false;
@@ -2065,7 +2076,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Shared by /permission-mode and the shift+tab cycle shortcut: persist to the
+  // Shared by /permission-mode and the alt+m cycle shortcut: persist to the
   // global config, apply in-memory for the current session, and tell the user
   // what changed.
   async function applyPermissionMode(mode: PermissionMode, ctx: any): Promise<void> {
@@ -2082,7 +2093,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   const PERMISSION_MODE_CYCLE: PermissionMode[] = ["ask", "plan", "auto"];
-  pi.registerShortcut("shift+tab", {
+  pi.registerShortcut("alt+m", {
     description: "Cycle permission mode (ask → plan → auto)",
     handler: async (ctx) => {
       const index = PERMISSION_MODE_CYCLE.indexOf(config.permissionMode);
@@ -2100,7 +2111,7 @@ export default function (pi: ExtensionAPI) {
           [
             `permission mode: ${config.permissionMode}`,
             `judge: ${config.judge.provider && config.judge.model ? `${config.judge.provider}/${config.judge.model}` : "内置默认候选（按 modelRegistry + auth 解析）"}`,
-            "设置: /permission-mode ask|plan|auto（写入全局配置，本会话即时生效）；shift+tab 循环切换。",
+            "设置: /permission-mode ask|plan|auto（写入全局配置，本会话即时生效）；alt+m 循环切换。",
           ].join("\n"),
           "info",
         );
@@ -2213,6 +2224,7 @@ export default function (pi: ExtensionAPI) {
           `root: ${root}`,
           `redacted: ${redactedTotal}`,
           `approved: ${approvedTotal}`,
+          `auto-approved: ${autoApprovedTotal}`,
           `blocked/declined: ${blockedTotal}`,
           `recoverable delete: ${config.recoverableDelete ? "enabled" : "disabled"}`,
           `judge: ${config.judge.provider && config.judge.model ? `${config.judge.provider}/${config.judge.model}` : "default candidates"}`,

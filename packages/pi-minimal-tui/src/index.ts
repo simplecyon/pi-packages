@@ -28,6 +28,7 @@ interface MinimalRendererState {
 const SAFE_REDACT_REQUEST = "simplecyon:safe-operation:redact";
 const BASH_REDACTION_OWNER_DISCOVER = "simplecyon:bash-redaction-owner:discover";
 const BASH_REDACTION_OWNER_AVAILABLE = "simplecyon:bash-redaction-owner:available";
+const SAFE_DECISION_EVENT = "simplecyon:safe-operation:decision";
 export const DEFAULT_BASH_TIMEOUT_SECONDS = 30;
 const THOUGHT_ENTRY_TYPE = "simplecyon/pi-minimal-tui/thought";
 
@@ -52,7 +53,12 @@ function toolPath(args: unknown): string | undefined {
 	return typeof path === "string" ? path : undefined;
 }
 
-function decorateTool(base: ToolDefinition, grouping: ActionGroupCoordinator): ToolDefinition {
+function decorateTool(
+	base: ToolDefinition,
+	grouping: ActionGroupCoordinator,
+	autoApprovedToolCalls: Set<string>,
+	autoApprovalInvalidators: Map<string, () => void>,
+): ToolDefinition {
 	const originalRenderCall = base.renderCall;
 	const originalRenderResult = base.renderResult;
 
@@ -66,8 +72,10 @@ function decorateTool(base: ToolDefinition, grouping: ActionGroupCoordinator): T
 				: undefined;
 			state.callInner = inner;
 			grouping.registerRenderer(context.toolCallId, context.invalidate);
+			autoApprovalInvalidators.set(context.toolCallId, context.invalidate);
 			const options = {
 				getGroupView: () => grouping.getView(context.toolCallId),
+				approval: () => autoApprovedToolCalls.has(context.toolCallId) ? "Auto approved" : undefined,
 				outcome: state.outcome,
 				showInnerCollapsed: false,
 			};
@@ -99,6 +107,7 @@ function decorateTool(base: ToolDefinition, grouping: ActionGroupCoordinator): T
 				{
 					getGroupView: () => grouping.getView(context.toolCallId),
 					outcome: state.outcome,
+					approval: () => autoApprovedToolCalls.has(context.toolCallId) ? "Auto approved" : undefined,
 					showInnerCollapsed: false,
 				},
 			);
@@ -156,6 +165,8 @@ function addBashRedactionBridge(definition: ToolDefinition, pi: ExtensionAPI): T
 export function createMinimalToolDefinitions(
 	cwd: string,
 	grouping = new ActionGroupCoordinator(),
+	autoApprovedToolCalls = new Set<string>(),
+	autoApprovalInvalidators = new Map<string, () => void>(),
 ): ToolDefinition[] {
 	return [
 		createReadToolDefinition(cwd),
@@ -167,7 +178,7 @@ export function createMinimalToolDefinitions(
 		createLsToolDefinition(cwd),
 	]
 		.map((definition) => addDefaultBashTimeout(definition as ToolDefinition))
-		.map((definition) => decorateTool(definition, grouping));
+		.map((definition) => decorateTool(definition, grouping, autoApprovedToolCalls, autoApprovalInvalidators));
 }
 
 export default function minimalTuiExtension(pi: ExtensionAPI): void {
@@ -175,6 +186,15 @@ export default function minimalTuiExtension(pi: ExtensionAPI): void {
 	installThinkingSuppression();
 	const cwd = process.cwd();
 	const grouping = new ActionGroupCoordinator();
+	const autoApprovedToolCalls = new Set<string>();
+	const autoApprovalInvalidators = new Map<string, () => void>();
+	pi.events.on(SAFE_DECISION_EVENT, (data) => {
+		if (!data || typeof data !== "object") return;
+		const event = data as { toolCallId?: unknown; decision?: unknown };
+		if (event.decision !== "auto-approved" || typeof event.toolCallId !== "string") return;
+		autoApprovedToolCalls.add(event.toolCallId);
+		autoApprovalInvalidators.get(event.toolCallId)?.();
+	});
 	pi.registerEntryRenderer(THOUGHT_ENTRY_TYPE, (entry, _options, theme) => {
 		const elapsedMs = (entry.data as { elapsedMs?: number } | undefined)?.elapsedMs;
 		if (typeof elapsedMs !== "number" || !Number.isFinite(elapsedMs)) return undefined;
@@ -190,6 +210,8 @@ export default function minimalTuiExtension(pi: ExtensionAPI): void {
 	announceBashRedactionOwner();
 
 	pi.on("session_start", (_event, context) => {
+		autoApprovedToolCalls.clear();
+		autoApprovalInvalidators.clear();
 		grouping.rebuild(context.sessionManager.getBranch());
 	});
 	pi.on("message_start", (event) => {
@@ -215,7 +237,7 @@ export default function minimalTuiExtension(pi: ExtensionAPI): void {
 		}
 	});
 
-	for (const definition of createMinimalToolDefinitions(cwd, grouping)) {
+	for (const definition of createMinimalToolDefinitions(cwd, grouping, autoApprovedToolCalls, autoApprovalInvalidators)) {
 		pi.registerTool(addBashRedactionBridge(definition, pi));
 	}
 }

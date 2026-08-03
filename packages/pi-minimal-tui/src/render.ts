@@ -118,6 +118,7 @@ export class ThoughtLineComponent implements Component {
 interface MinimalToolCallOptions {
 	getGroupView?: () => GroupView | undefined;
 	outcome?: string;
+	approval?: () => string | undefined;
 	showInnerCollapsed?: boolean;
 }
 
@@ -173,6 +174,8 @@ export class MinimalToolCallComponent implements Component {
 						),
 					];
 		lines.push(summaryLine(summary, this.theme, width, this.options.outcome, groupView?.marker));
+		const approval = this.options.approval?.();
+		if (approval) lines.push(truncateToWidth(this.theme.fg("muted", `⨽ ${approval}`), width));
 		// ToolExecutionComponent supplies a leading spacer, but adjacent messages
 		// do not get one. Add a trailing spacer only at a message boundary, so
 		// consecutive action events do not acquire extra blank rows.
