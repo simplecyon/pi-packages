@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import safeOperation from "../src/index.ts";
+import safeOperation, { __setJudgeCompleteForTests } from "../src/index.ts";
 
 async function loadSafeOperation(cwd: string) {
   const handlers = new Map<string, Array<(...args: any[]) => any>>();
@@ -14,6 +14,11 @@ async function loadSafeOperation(cwd: string) {
   const entries: Array<{ customType: string; data: unknown }> = [];
   const busHandlers = new Map<string, Array<(data: unknown) => void>>();
   const emitted: Array<{ channel: string; data: unknown }> = [];
+  const activeTools = ["read", "bash", "edit", "write", "grep", "find", "ls", "safe_delete"];
+  const flags = new Map<string, unknown>();
+  const shortcuts = new Map<string, unknown>();
+  const sentMessages: Array<{ message: any; options: unknown }> = [];
+  const sentUserMessages: Array<{ content: string; options: unknown }> = [];
   const pi = {
     on(name: string, handler: (...args: any[]) => any) {
       const list = handlers.get(name) ?? [];
@@ -25,6 +30,27 @@ async function loadSafeOperation(cwd: string) {
     },
     registerCommand(name: string, command: unknown) {
       commands.set(name, command);
+    },
+    registerFlag(name: string, spec: { default?: unknown }) {
+      flags.set(name, spec?.default);
+    },
+    getFlag(name: string) {
+      return flags.get(name);
+    },
+    registerShortcut(key: string, spec: unknown) {
+      shortcuts.set(key, spec);
+    },
+    getActiveTools() {
+      return [...activeTools];
+    },
+    setActiveTools(names: string[]) {
+      activeTools.splice(0, activeTools.length, ...names);
+    },
+    sendMessage(message: any, options: unknown) {
+      sentMessages.push({ message, options });
+    },
+    sendUserMessage(content: string, options: unknown) {
+      sentUserMessages.push({ content, options });
     },
     appendEntry(customType: string, data: unknown) {
       entries.push({ customType, data });
@@ -51,10 +77,10 @@ async function loadSafeOperation(cwd: string) {
     },
   } as unknown as ExtensionAPI;
   safeOperation(pi);
-  return { handlers, tools, commands, entries, pi, emitted };
+  return { handlers, tools, commands, entries, pi, emitted, activeTools, flags, shortcuts, sentMessages, sentUserMessages };
 }
 
-function baseContext(cwd: string, hasUI = false) {
+function baseContext(cwd: string, hasUI = false, sessionEntries: unknown[] = []) {
   return {
     cwd,
     hasUI,
@@ -63,13 +89,27 @@ function baseContext(cwd: string, hasUI = false) {
     sessionManager: {
       getSessionId: () => "safe-operation-test-session",
       getSessionFile: () => undefined,
+      getEntries: () => sessionEntries,
     },
     model: undefined,
     thinkingLevel: undefined,
+    modelRegistry: {
+      find: () => undefined,
+      hasConfiguredAuth: () => false,
+      getApiKeyAndHeaders: async () => ({ ok: false, error: "modelRegistry stub: no judge models" }),
+    },
     ui: {
       confirm: async () => false,
       input: async () => undefined,
       notify: () => {},
+      select: async () => undefined,
+      editor: async () => undefined,
+      setStatus: () => {},
+      setWidget: () => {},
+      theme: {
+        fg: (_color: string, text: string) => text,
+        strikethrough: (text: string) => text,
+      },
     },
   };
 }
@@ -790,6 +830,644 @@ test("rejects a trash manifest symlink that escapes the managed trash", async ()
     );
     assert.match(JSON.stringify(result), /manifest symlinks/);
   } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("a trusted project cannot raise permissionMode to auto above the user baseline", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-permission-auto-"));
+  try {
+    fs.mkdirSync(path.join(tmp, ".pi"));
+    fs.writeFileSync(
+      path.join(tmp, ".pi", "safe-operation.json"),
+      JSON.stringify({ permissionMode: "auto" }),
+    );
+    const extension = await loadSafeOperation(tmp);
+    const sessionStart = extension.handlers.get("session_start")?.[0];
+    const toolCall = extension.handlers.get("tool_call")?.[0];
+    assert.ok(sessionStart);
+    assert.ok(toolCall);
+    await sessionStart({ type: "session_start", reason: "startup" }, baseContext(tmp, true));
+
+    let confirmTitle = "";
+    const result = await toolCall(
+      {
+        type: "tool_call",
+        toolName: "bash",
+        toolCallId: "permission-auto-force-push",
+        input: { command: "git push --force origin main" },
+      },
+      {
+        ...baseContext(tmp, true),
+        ui: {
+          confirm: async (title: string) => {
+            confirmTitle = title;
+            return false;
+          },
+          input: async () => undefined,
+          notify: () => {},
+        },
+      },
+    );
+
+    // Auto mode exists, but only the user-level (global) config may enable it.
+    // A trusted project asking for "auto" clamps back to "ask", so the flagged
+    // operation routes through interactive confirmation and honors a denial.
+    assert.equal(confirmTitle, "确认高风险操作");
+    assert.equal(result?.block, true);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+const PLAN_ASSISTANT_MESSAGE = {
+  role: "assistant",
+  content: [
+    {
+      type: "text",
+      text: "Explored the repo.\n\nPlan:\n1. Inspect the config loader\n2. Add the permissionMode field\n3. Update the regression tests\n",
+    },
+  ],
+};
+
+async function runSessionStart(extension: any, event: any, ctx: any) {
+  for (const handler of extension.handlers.get("session_start") ?? []) {
+    await handler(event, ctx);
+  }
+}
+
+async function startPlanning(extension: any, tmp: string) {
+  await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+  const planCommand = extension.commands.get("plan") as { handler: (args: unknown, ctx: any) => Promise<void> };
+  assert.ok(planCommand);
+  await planCommand.handler("", baseContext(tmp, true));
+}
+
+async function approvePlan(extension: any, tmp: string) {
+  const agentEnd = extension.handlers.get("agent_end")?.[0];
+  assert.ok(agentEnd);
+  const approveCtx = {
+    ...baseContext(tmp, true),
+    ui: { ...baseContext(tmp, true).ui, select: async () => "Execute the plan (track progress)" },
+  };
+  await agentEnd({ type: "agent_end", messages: [PLAN_ASSISTANT_MESSAGE] }, approveCtx);
+}
+
+test("plan mode gates write tools and non-allowlisted bash during planning", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-plan-gate-"));
+  try {
+    const extension = await loadSafeOperation(tmp);
+    await startPlanning(extension, tmp);
+    const toolCall = extension.handlers.get("tool_call")?.[0];
+    assert.ok(toolCall);
+
+    assert.ok(!extension.activeTools.includes("edit"));
+    assert.ok(!extension.activeTools.includes("write"));
+    assert.ok(!extension.activeTools.includes("safe_delete"));
+    assert.ok(extension.activeTools.includes("bash"));
+
+    const blocked = await toolCall(
+      { type: "tool_call", toolName: "bash", toolCallId: "plan-bash-blocked", input: { command: "npm install left-pad" } },
+      baseContext(tmp),
+    );
+    assert.equal(blocked?.block, true);
+    assert.match(blocked?.reason ?? "", /Plan mode is active \(planning phase\)/);
+
+    const allowed = await toolCall(
+      { type: "tool_call", toolName: "bash", toolCallId: "plan-bash-allowed", input: { command: "git status" } },
+      baseContext(tmp),
+    );
+    assert.equal(allowed, undefined);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("planning phase blocks write even for an ordinary target", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-plan-write-"));
+  try {
+    const extension = await loadSafeOperation(tmp);
+    await startPlanning(extension, tmp);
+    const toolCall = extension.handlers.get("tool_call")?.[0];
+    assert.ok(toolCall);
+
+    const write = await toolCall(
+      { type: "tool_call", toolName: "write", toolCallId: "plan-write", input: { path: "notes.md", content: "hello" } },
+      baseContext(tmp),
+    );
+    assert.equal(write?.block, true);
+    assert.match(write?.reason ?? "", /Plan mode is active \(planning phase\)/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("plan approval gate enters the execution phase and tracks progress", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-plan-exec-"));
+  try {
+    const extension = await loadSafeOperation(tmp);
+    await startPlanning(extension, tmp);
+    const beforeAgentStart = extension.handlers.get("before_agent_start")?.[0];
+    const turnEnd = extension.handlers.get("turn_end")?.[0];
+    assert.ok(beforeAgentStart);
+    assert.ok(turnEnd);
+
+    const planningInjection = await beforeAgentStart({ type: "before_agent_start" }, baseContext(tmp, true));
+    assert.match(planningInjection?.message?.content ?? "", /\[PLAN MODE ACTIVE\]/);
+
+    await approvePlan(extension, tmp);
+
+    assert.ok(extension.activeTools.includes("edit"));
+    assert.ok(extension.activeTools.includes("write"));
+    const execMessage = extension.sentMessages.find(
+      (sent: any) => sent.message?.customType === "pi-safe-operation:plan-mode-execute",
+    );
+    assert.ok(execMessage);
+    assert.equal((execMessage.options as any)?.triggerTurn, true);
+
+    const executionInjection = await beforeAgentStart({ type: "before_agent_start" }, baseContext(tmp, true));
+    assert.match(executionInjection?.message?.content ?? "", /\[EXECUTING PLAN/);
+
+    await turnEnd(
+      { type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "Step one done [DONE:1]" }] } },
+      baseContext(tmp, true),
+    );
+    const persisted = [...extension.entries].reverse().find((e) => e.customType === "pi-safe-operation:plan-mode");
+    const todos = (persisted?.data as any)?.todos ?? [];
+    assert.equal(todos[0]?.completed, true);
+    assert.equal(todos[1]?.completed, false);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("execution phase still requires interactive confirmation for flagged operations", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-plan-confirm-"));
+  try {
+    const extension = await loadSafeOperation(tmp);
+    await startPlanning(extension, tmp);
+    await approvePlan(extension, tmp);
+    const toolCall = extension.handlers.get("tool_call")?.[0];
+    assert.ok(toolCall);
+
+    let confirmCalls = 0;
+    const result = await toolCall(
+      { type: "tool_call", toolName: "bash", toolCallId: "exec-force-push", input: { command: "git push --force origin main" } },
+      {
+        ...baseContext(tmp, true),
+        ui: {
+          ...baseContext(tmp, true).ui,
+          confirm: async () => {
+            confirmCalls += 1;
+            return false;
+          },
+        },
+      },
+    );
+    assert.equal(confirmCalls, 1);
+    assert.equal(result?.block, true);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("plan state persists and restores across sessions", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-plan-resume-"));
+  try {
+    const first = await loadSafeOperation(tmp);
+    await startPlanning(first, tmp);
+    const agentEnd = first.handlers.get("agent_end")?.[0];
+    assert.ok(agentEnd);
+    const stayCtx = {
+      ...baseContext(tmp, true),
+      ui: { ...baseContext(tmp, true).ui, select: async () => "Stay in plan mode" },
+    };
+    await agentEnd({ type: "agent_end", messages: [PLAN_ASSISTANT_MESSAGE] }, stayCtx);
+    const persistedEntries = first.entries.map((e) => ({ type: "custom", customType: e.customType, data: e.data }));
+    assert.ok(persistedEntries.some((e) => e.customType === "pi-safe-operation:plan-mode"));
+
+    const second = await loadSafeOperation(tmp);
+    await runSessionStart(second, { type: "session_start", reason: "resume" }, baseContext(tmp, true, persistedEntries));
+    assert.ok(!second.activeTools.includes("edit"));
+    assert.ok(!second.activeTools.includes("write"));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("--plan flag starts a fresh session in the planning phase", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-plan-flag-"));
+  try {
+    const extension = await loadSafeOperation(tmp);
+    extension.flags.set("plan", true);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    assert.ok(!extension.activeTools.includes("edit"));
+    assert.ok(!extension.activeTools.includes("write"));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("permissionMode plan in global config starts a fresh session planning", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-plan-config-"));
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-plan-home-"));
+  const originalUserProfile = process.env.USERPROFILE;
+  const originalHome = process.env.HOME;
+  try {
+    fs.mkdirSync(path.join(tmpHome, ".pi", "agent"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpHome, ".pi", "agent", "safe-operation.json"),
+      JSON.stringify({ permissionMode: "plan" }),
+    );
+    process.env.USERPROFILE = tmpHome;
+    process.env.HOME = tmpHome;
+
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    assert.ok(!extension.activeTools.includes("edit"));
+    assert.ok(!extension.activeTools.includes("safe_delete"));
+  } finally {
+    if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = originalUserProfile;
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Auto mode: judge adjudication
+// ---------------------------------------------------------------------------
+
+function judgeVerdictResponse(verdict: Record<string, unknown>) {
+  return { content: [{ type: "text", text: JSON.stringify(verdict) }] };
+}
+
+function installFakeJudge(respond: (call: { model: any; context: any; options: any }) => Promise<any>) {
+  const calls: Array<{ model: any; context: any; options: any }> = [];
+  __setJudgeCompleteForTests(async (model: unknown, context: unknown, options: unknown) => {
+    const call = { model, context, options };
+    calls.push(call);
+    return respond(call);
+  });
+  return calls;
+}
+
+function fakeJudgeRegistry(modelId = "j1") {
+  const model = { provider: "test-provider", id: modelId };
+  const registry = {
+    find: (provider: string, id: string) =>
+      provider === "test-provider" && id === modelId ? model : undefined,
+    hasConfiguredAuth: () => true,
+    getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key" }),
+  };
+  return { model, registry };
+}
+
+function withGlobalConfig(config: Record<string, unknown>) {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-home-"));
+  fs.mkdirSync(path.join(tmpHome, ".pi", "agent"), { recursive: true });
+  fs.writeFileSync(path.join(tmpHome, ".pi", "agent", "safe-operation.json"), JSON.stringify(config));
+  const originalUserProfile = process.env.USERPROFILE;
+  const originalHome = process.env.HOME;
+  process.env.USERPROFILE = tmpHome;
+  process.env.HOME = tmpHome;
+  return () => {
+    if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = originalUserProfile;
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  };
+}
+
+interface ConfirmRecord {
+  title: string;
+  message: string;
+}
+
+function autoTestContext(tmp: string, registry: unknown, confirms: ConfirmRecord[], answer = false) {
+  const base = baseContext(tmp, true);
+  return {
+    ...base,
+    modelRegistry: registry,
+    ui: {
+      ...base.ui,
+      confirm: async (title: string, message: string) => {
+        confirms.push({ title, message });
+        return answer;
+      },
+    },
+  };
+}
+
+async function flaggedOverwrite(extension: any, ctx: any) {
+  const toolCall = extension.handlers.get("tool_call")?.[0];
+  assert.ok(toolCall);
+  return toolCall(
+    { type: "tool_call", toolName: "write", toolCallId: "auto-write", input: { path: "notes.txt", content: "new" } },
+    ctx,
+  );
+}
+
+test("auto mode allows a flagged write when the judge allows", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-allow-"));
+  const restoreHome = withGlobalConfig({
+    permissionMode: "auto",
+    judge: { provider: "test-provider", model: "j1" },
+  });
+  const calls = installFakeJudge(async () =>
+    judgeVerdictResponse({ verdict: "allow", riskLevel: "low", rationale: "常规项目文件编辑，风险可控" }));
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const confirms: ConfirmRecord[] = [];
+    const { registry } = fakeJudgeRegistry();
+    const result = await flaggedOverwrite(extension, autoTestContext(tmp, registry, confirms));
+    assert.equal(result, undefined);
+    assert.equal(calls.length, 1);
+    assert.equal(confirms.length, 0);
+    const userText = (calls[0].context as any).messages[0].content[0].text as string;
+    assert.match(userText, /<untrusted-operation>/);
+    assert.match(userText, /notes\.txt/);
+    assert.ok(
+      extension.entries.some(
+        (e) =>
+          e.customType === "pi-safe-operation" &&
+          (e.data as any)?.action === "judge-verdict" &&
+          (e.data as any)?.verdict === "allow" &&
+          (e.data as any)?.judgeModel === "test-provider/j1",
+      ),
+    );
+  } finally {
+    __setJudgeCompleteForTests(null);
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("auto mode blocks with the judge adjustment when the verdict is adjust", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-adjust-"));
+  const restoreHome = withGlobalConfig({
+    permissionMode: "auto",
+    judge: { provider: "test-provider", model: "j1" },
+  });
+  const calls = installFakeJudge(async () =>
+    judgeVerdictResponse({
+      verdict: "adjust",
+      riskLevel: "medium",
+      rationale: "覆盖未跟踪文件可能丢失旧内容",
+      adjustment: "先备份原文件或改用 edit 增量修改",
+    }));
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const confirms: ConfirmRecord[] = [];
+    const { registry } = fakeJudgeRegistry();
+    const result = await flaggedOverwrite(extension, autoTestContext(tmp, registry, confirms));
+    assert.equal(result?.block, true);
+    assert.match(result?.reason ?? "", /建议调整：先备份原文件或改用 edit 增量修改/);
+    assert.match(result?.reason ?? "", /constraint on the intended effect/);
+    assert.equal(calls.length, 1);
+    assert.equal(confirms.length, 0);
+  } finally {
+    __setJudgeCompleteForTests(null);
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("auto mode escalate verdict asks the user and proceeds on approval", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-escalate-approve-"));
+  const restoreHome = withGlobalConfig({
+    permissionMode: "auto",
+    judge: { provider: "test-provider", model: "j1" },
+  });
+  installFakeJudge(async () =>
+    judgeVerdictResponse({
+      verdict: "escalate",
+      riskLevel: "high",
+      rationale: "覆盖已有文件且旧内容不可恢复",
+      authorizationAsk: "确认覆盖 notes.txt 中的旧笔记",
+    }));
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const confirms: ConfirmRecord[] = [];
+    const { registry } = fakeJudgeRegistry();
+    const result = await flaggedOverwrite(extension, autoTestContext(tmp, registry, confirms, true));
+    assert.equal(result, undefined);
+    assert.equal(confirms.length, 1);
+    assert.match(confirms[0].message, /确认覆盖 notes\.txt 中的旧笔记/);
+  } finally {
+    __setJudgeCompleteForTests(null);
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("auto mode escalate verdict blocks when the user declines", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-escalate-decline-"));
+  const restoreHome = withGlobalConfig({
+    permissionMode: "auto",
+    judge: { provider: "test-provider", model: "j1" },
+  });
+  installFakeJudge(async () =>
+    judgeVerdictResponse({
+      verdict: "escalate",
+      riskLevel: "high",
+      rationale: "覆盖已有文件且旧内容不可恢复",
+      authorizationAsk: "确认覆盖 notes.txt 中的旧笔记",
+    }));
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const confirms: ConfirmRecord[] = [];
+    const { registry } = fakeJudgeRegistry();
+    const result = await flaggedOverwrite(extension, autoTestContext(tmp, registry, confirms, false));
+    assert.equal(result?.block, true);
+    assert.match(result?.reason ?? "", /Write blocked by pi-safe-operation/);
+    assert.equal(confirms.length, 1);
+  } finally {
+    __setJudgeCompleteForTests(null);
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("auto mode falls back to interactive confirmation when the judge call fails", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-fail-escalate-"));
+  const restoreHome = withGlobalConfig({
+    permissionMode: "auto",
+    judge: { provider: "test-provider", model: "j1" },
+  });
+  installFakeJudge(async () => {
+    throw new Error("network down");
+  });
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const confirms: ConfirmRecord[] = [];
+    const { registry } = fakeJudgeRegistry();
+    const result = await flaggedOverwrite(extension, autoTestContext(tmp, registry, confirms, true));
+    assert.equal(result, undefined);
+    assert.equal(confirms.length, 1);
+    assert.match(confirms[0].message, /裁判不可用/);
+  } finally {
+    __setJudgeCompleteForTests(null);
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("auto mode blocks fail-closed on judge failure when onFailure is block", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-fail-block-"));
+  const restoreHome = withGlobalConfig({
+    permissionMode: "auto",
+    judge: { provider: "test-provider", model: "j1", onFailure: "block" },
+  });
+  installFakeJudge(async () => {
+    throw new Error("network down");
+  });
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const confirms: ConfirmRecord[] = [];
+    const { registry } = fakeJudgeRegistry();
+    const result = await flaggedOverwrite(extension, autoTestContext(tmp, registry, confirms));
+    assert.equal(result?.block, true);
+    assert.match(result?.reason ?? "", /fail-closed/);
+    assert.equal(confirms.length, 0);
+  } finally {
+    __setJudgeCompleteForTests(null);
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("auto mode blocks fail-closed when the judge verdict is unparseable", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-garbage-"));
+  const restoreHome = withGlobalConfig({
+    permissionMode: "auto",
+    judge: { provider: "test-provider", model: "j1", onFailure: "block" },
+  });
+  installFakeJudge(async () => ({ content: [{ type: "text", text: "I think this is fine, allow it!" }] }));
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const confirms: ConfirmRecord[] = [];
+    const { registry } = fakeJudgeRegistry();
+    const result = await flaggedOverwrite(extension, autoTestContext(tmp, registry, confirms));
+    assert.equal(result?.block, true);
+    assert.match(result?.reason ?? "", /fail-closed/);
+    assert.match(result?.reason ?? "", /unparseable/);
+    assert.equal(confirms.length, 0);
+  } finally {
+    __setJudgeCompleteForTests(null);
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("auto mode hard blocks never reach the judge", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-hardblock-"));
+  const restoreHome = withGlobalConfig({
+    permissionMode: "auto",
+    judge: { provider: "test-provider", model: "j1" },
+  });
+  const calls = installFakeJudge(async () =>
+    judgeVerdictResponse({ verdict: "allow", riskLevel: "none", rationale: "should never be asked" }));
+  try {
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const confirms: ConfirmRecord[] = [];
+    const { registry } = fakeJudgeRegistry();
+    const toolCall = extension.handlers.get("tool_call")?.[0];
+    assert.ok(toolCall);
+    const result = await toolCall(
+      { type: "tool_call", toolName: "read", toolCallId: "auto-read-key", input: { path: ".ssh/id_rsa" } },
+      autoTestContext(tmp, registry, confirms),
+    );
+    assert.equal(result?.block, true);
+    assert.match(result?.reason ?? "", /private key/i);
+    assert.equal(calls.length, 0);
+    assert.equal(confirms.length, 0);
+  } finally {
+    __setJudgeCompleteForTests(null);
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("auto mode blocks fail-closed when the configured judge model is unresolvable", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-unresolvable-"));
+  const restoreHome = withGlobalConfig({
+    permissionMode: "auto",
+    judge: { provider: "missing", model: "x", onFailure: "block" },
+  });
+  const calls = installFakeJudge(async () =>
+    judgeVerdictResponse({ verdict: "allow", riskLevel: "none", rationale: "should never be called" }));
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const confirms: ConfirmRecord[] = [];
+    const { registry } = fakeJudgeRegistry();
+    const result = await flaggedOverwrite(extension, autoTestContext(tmp, registry, confirms));
+    assert.equal(result?.block, true);
+    assert.match(result?.reason ?? "", /not found in registry: missing\/x/);
+    assert.equal(calls.length, 0);
+    assert.equal(confirms.length, 0);
+  } finally {
+    __setJudgeCompleteForTests(null);
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("project config can raise auditSafeOps but cannot redirect the judge model", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-clamp-"));
+  const restoreHome = withGlobalConfig({
+    permissionMode: "auto",
+    judge: { provider: "test-provider", model: "j1" },
+  });
+  const calls = installFakeJudge(async () =>
+    judgeVerdictResponse({ verdict: "allow", riskLevel: "low", rationale: "全新文件，无风险" }));
+  try {
+    fs.mkdirSync(path.join(tmp, ".pi"));
+    fs.writeFileSync(
+      path.join(tmp, ".pi", "safe-operation.json"),
+      JSON.stringify({ judge: { provider: "evil", model: "x", auditSafeOps: true } }),
+    );
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const confirms: ConfirmRecord[] = [];
+    const { registry } = fakeJudgeRegistry();
+    const toolCall = extension.handlers.get("tool_call")?.[0];
+    assert.ok(toolCall);
+    // A fresh-file write has no deterministic flags: only the project-raised
+    // auditSafeOps sends it to the judge, and the judge identity stays pinned
+    // to the user baseline (test-provider/j1), never the project-chosen evil/x.
+    const result = await toolCall(
+      { type: "tool_call", toolName: "write", toolCallId: "auto-safe-write", input: { path: "fresh.txt", content: "new" } },
+      autoTestContext(tmp, registry, confirms),
+    );
+    assert.equal(result, undefined);
+    assert.equal(calls.length, 1);
+    assert.equal((calls[0].model as any).id, "j1");
+    assert.equal((calls[0].model as any).provider, "test-provider");
+    assert.equal(confirms.length, 0);
+  } finally {
+    __setJudgeCompleteForTests(null);
+    restoreHome();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });

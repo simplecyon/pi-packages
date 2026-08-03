@@ -18,6 +18,16 @@ import {
   isToolCallEventType,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { isSafePlanCommand, setupPermissionMode } from "./permission-mode.ts";
+import type { PermissionMode } from "./permission-mode.ts";
+import {
+  DEFAULT_JUDGE_CONFIG,
+  judgeAdjudicate,
+  judgeRequestFromEvent,
+  NON_CIRCUMVENTION_GUIDELINE,
+  normalizeJudgeConfig,
+} from "./judge.ts";
+import type { JudgeConfig } from "./judge.ts";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -37,6 +47,7 @@ interface RedactionConfig {
 interface SafeOperationConfig {
   version: number;
   mode: "balanced" | "strict";
+  permissionMode: PermissionMode;
   protectedPaths: string[];
   noDeletePaths: string[];
   sensitivePaths: string[];
@@ -44,6 +55,7 @@ interface SafeOperationConfig {
   maxExplicitTargets: number;
   recoverableDelete: boolean;
   redaction: RedactionConfig;
+  judge: JudgeConfig;
 }
 
 interface InspectedTarget {
@@ -100,6 +112,7 @@ interface ApprovalCopy {
 const DEFAULT_CONFIG: SafeOperationConfig = {
   version: 1,
   mode: "balanced",
+  permissionMode: "ask",
   protectedPaths: [
     ".git",
     ".pi/safe-operation.json",
@@ -123,14 +136,8 @@ const DEFAULT_CONFIG: SafeOperationConfig = {
     scanToolResults: true,
     scanFinalContext: true,
   },
+  judge: DEFAULT_JUDGE_CONFIG,
 };
-
-const NON_CIRCUMVENTION_GUIDELINE =
-  "Treat a safety decision as a constraint on the intended effect, not only on one tool call. " +
-  "After an operation is blocked or declined, do not retry, translate, decompose, delegate, or recommend " +
-  "another mechanism that would achieve substantially the same effect. Continue only when the proposed action " +
-  "materially narrows the scope or removes the stated risk, or, after a user decline rather than a policy block, " +
-  "the user provides fresh explicit authorization; otherwise explain the boundary and stop.";
 
 const CODE_EXTENSIONS = new Set([
   ".py", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".jsx", ".tsx",
@@ -158,8 +165,34 @@ const BASH_REDACTION_OWNER_AVAILABLE = "simplecyon:bash-redaction-owner:availabl
 const TOOL_RUNTIME_APPROVAL_END = "simplecyon:tool-runtime:approval-end";
 const DEFAULT_BASH_TIMEOUT_SECONDS = 30;
 
+// The judge completion is resolved lazily from the host's pi-ai at runtime (pi's
+// extension loader resolves host modules, as the official custom-compaction
+// example relies on). A non-literal specifier keeps tsc from requiring pi-ai at
+// package typecheck time; tests inject a fake through __setJudgeCompleteForTests
+// and never trigger this import.
+const PI_AI_COMPAT_SPEC = "@earendil-works/pi-ai/compat";
+async function defaultJudgeComplete(model: unknown, context: unknown, options: unknown): Promise<any> {
+  const mod: any = await import(PI_AI_COMPAT_SPEC);
+  return mod.completeSimple(model, context, options);
+}
+let judgeCompleteOverride: ((model: unknown, context: unknown, options: unknown) => Promise<any>) | null = null;
+/** Test-only seam: override the judge completion. Pass null to restore the default. */
+export function __setJudgeCompleteForTests(impl: typeof judgeCompleteOverride): void {
+  judgeCompleteOverride = impl;
+}
+
 function unique(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+const PERMISSION_AUTONOMY: Record<PermissionMode, number> = { ask: 0, plan: 1, auto: 2 };
+
+function normalizePermissionMode(value: unknown, fallback: PermissionMode): PermissionMode {
+  return value === "ask" || value === "plan" || value === "auto" ? value : fallback;
+}
+
+function leastAutonomousMode(a: PermissionMode, b: PermissionMode): PermissionMode {
+  return PERMISSION_AUTONOMY[a] <= PERMISSION_AUTONOMY[b] ? a : b;
 }
 
 function mergeConfig(base: SafeOperationConfig, next: Partial<SafeOperationConfig>): SafeOperationConfig {
@@ -168,6 +201,8 @@ function mergeConfig(base: SafeOperationConfig, next: Partial<SafeOperationConfi
     ...next,
     version: 1,
     mode: next.mode === "strict" ? "strict" : base.mode,
+    permissionMode: normalizePermissionMode(next.permissionMode, base.permissionMode),
+    judge: normalizeJudgeConfig(next.judge, base.judge),
     protectedPaths: unique([...base.protectedPaths, ...(next.protectedPaths ?? [])]),
     noDeletePaths: unique([...base.noDeletePaths, ...(next.noDeletePaths ?? [])]),
     sensitivePaths: unique([...base.sensitivePaths, ...(next.sensitivePaths ?? [])]),
@@ -198,7 +233,7 @@ function readConfigFile(filePath: string): Partial<SafeOperationConfig> | null {
 }
 
 function loadConfig(cwd: string, projectTrusted: boolean): SafeOperationConfig {
-  let config = { ...DEFAULT_CONFIG, redaction: { ...DEFAULT_CONFIG.redaction } };
+  let config = { ...DEFAULT_CONFIG, redaction: { ...DEFAULT_CONFIG.redaction }, judge: { ...DEFAULT_CONFIG.judge } };
   const globalConfig = readConfigFile(path.join(os.homedir(), CONFIG_DIR_NAME, "agent", "safe-operation.json"));
   if (globalConfig) config = mergeConfig(config, globalConfig);
   if (projectTrusted) {
@@ -210,6 +245,9 @@ function loadConfig(cwd: string, projectTrusted: boolean): SafeOperationConfig {
       // user's egress boundary or raise destructive-operation limits.
       config = {
         ...merged,
+        // A trusted project may tighten autonomy toward "ask" but must not
+        // unilaterally escalate it (e.g. silently enabling judge auto-approval).
+        permissionMode: leastAutonomousMode(baseline.permissionMode, merged.permissionMode),
         maxExplicitTargets: Math.min(baseline.maxExplicitTargets, merged.maxExplicitTargets),
         redaction: {
           ...merged.redaction,
@@ -220,6 +258,19 @@ function loadConfig(cwd: string, projectTrusted: boolean): SafeOperationConfig {
             baseline.redaction.maxSecretDensity,
             merged.redaction.maxSecretDensity,
           ),
+        },
+        // Judge identity and budget are pinned to the user's baseline: a project
+        // may only raise friction (enable auditSafeOps, tighten onFailure to
+        // "block"), never redirect the audit to a project-chosen judge model.
+        judge: {
+          ...merged.judge,
+          provider: baseline.judge.provider,
+          model: baseline.judge.model,
+          maxTokens: baseline.judge.maxTokens,
+          timeoutMs: baseline.judge.timeoutMs,
+          reasoning: baseline.judge.reasoning,
+          auditSafeOps: baseline.judge.auditSafeOps || merged.judge.auditSafeOps,
+          onFailure: merged.judge.onFailure === "block" ? "block" : baseline.judge.onFailure,
         },
       };
     }
@@ -713,6 +764,7 @@ export default function (pi: ExtensionAPI) {
   let redactedTotal = 0;
   let blockedTotal = 0;
   let approvedTotal = 0;
+  let judgeAnnounced = false;
   let externalBashRedactionOwner = false;
   let standaloneBashRegistered = false;
 
@@ -921,7 +973,7 @@ export default function (pi: ExtensionAPI) {
     standaloneBashRegistered = true;
   }
 
-  async function confirmOperation(
+  async function interactiveConfirm(
     ctx: any,
     title: string,
     message: string,
@@ -953,6 +1005,61 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  // Adjudication seam: permissionMode selects how a flagged operation is decided.
+  // The runtime planning phase blocks every flagged operation outright (the
+  // write/bash gates in the tool_call handler are the primary enforcement; this
+  // is the backstop), regardless of how plan mode was entered (config, --plan
+  // flag, or /plan command). In the execution phase, "plan" falls back to
+  // interactive confirmation for flagged operations; "auto" routes the operation
+  // to the judge model (allow / adjust-block / escalate), fail-closed on any
+  // judge failure. Returns true to allow, or the block reason string.
+  async function adjudicate(
+    ctx: any,
+    title: string,
+    message: string,
+    auditData: Record<string, unknown>,
+    runtime: { toolCallId: string; toolName: string },
+    declineReason: string,
+    event: any,
+  ): Promise<true | string> {
+    if (planMode.isPlanningPhase()) {
+      blockedTotal += 1;
+      audit("blocked-plan-phase", auditData);
+      return declineReason;
+    }
+    if (config.permissionMode === "auto") {
+      return judgeAdjudicate({
+        ctx,
+        judgeConfig: config.judge,
+        request: judgeRequestFromEvent(event, auditData, (text) => redactText(text).text),
+        title,
+        message,
+        declineReason,
+        auditData,
+        deps: {
+          complete: (model, context, options) =>
+            (judgeCompleteOverride ?? defaultJudgeComplete)(model, context, options),
+          redact: (text) => redactText(text).text,
+          audit,
+          confirmInteractively: (confirmTitle, confirmMessage) =>
+            interactiveConfirm(ctx, confirmTitle, confirmMessage, auditData, runtime),
+          countApproved: () => {
+            approvedTotal += 1;
+          },
+          countBlocked: () => {
+            blockedTotal += 1;
+          },
+          announce: (judgeId) => {
+            if (judgeAnnounced) return;
+            judgeAnnounced = true;
+            ctx.ui?.notify?.(`[pi-safe-operation] auto 模式裁判模型: ${judgeId}`, "info");
+          },
+        },
+      });
+    }
+    return (await interactiveConfirm(ctx, title, message, auditData, runtime)) ? true : declineReason;
+  }
+
   pi.on("session_start", async (_event, ctx) => {
     root = ctx.cwd;
     sessionKey = crypto.randomBytes(32);
@@ -960,6 +1067,7 @@ export default function (pi: ExtensionAPI) {
     blockedTotal = 0;
     approvedTotal = 0;
     config = loadConfig(root, ctx.isProjectTrusted());
+    judgeAnnounced = false;
     registerStandaloneBash();
   });
 
@@ -978,6 +1086,20 @@ export default function (pi: ExtensionAPI) {
         }
         // Other sensitive files may be read because tool_result is redacted before model context.
         return;
+      }
+
+      if (
+        planMode.isPlanningPhase() &&
+        (event.toolName === "write" || event.toolName === "edit" || event.toolName === "safe_delete")
+      ) {
+        blockedTotal += 1;
+        audit("blocked-plan-phase", { tool: event.toolName });
+        return {
+          block: true,
+          reason:
+            "Plan mode is active (planning phase): file changes and deletions are disabled until the plan is approved. " +
+            "Finish the plan and let the user approve it, or ask the user to run /plan to exit plan mode.",
+        };
       }
 
       if (
@@ -1007,7 +1129,27 @@ export default function (pi: ExtensionAPI) {
           const status = await pi.exec("git", ["status", "--porcelain", "--", path.relative(ctx.cwd, absolute)]);
           if (status.code === 0 && status.stdout.trim()) reasons.push("target already has uncommitted changes");
         }
-        if (reasons.length === 0) return;
+        if (reasons.length === 0) {
+          if (config.permissionMode === "auto" && config.judge.auditSafeOps) {
+            const safeVerdict = await adjudicate(
+              ctx,
+              "裁判审计：文件修改",
+              approvalMessage({
+                action: `${event.toolName === "edit" ? "编辑" : "写入"}文件 ${filePath}（未被确定性规则标记，按 judge.auditSafeOps 送审）。`,
+                worthWhen: "这是当前任务需要修改的文件。",
+                risks: ["纵深防御审计：该修改未被规则标记，由裁判模型复核。"],
+                impact: [filePath],
+                saferChoice: "不确定时先取消。",
+              }),
+              { tool: event.toolName, path: filePath, reasons: [] },
+              { toolCallId: event.toolCallId, toolName: event.toolName },
+              "Write blocked by pi-safe-operation (judge.auditSafeOps)",
+              event,
+            );
+            if (safeVerdict !== true) return { block: true, reason: safeVerdict };
+          }
+          return;
+        }
 
         const writeAction =
           event.toolName === "edit"
@@ -1015,7 +1157,7 @@ export default function (pi: ExtensionAPI) {
             : fs.existsSync(absolute)
               ? `覆盖文件 ${filePath}。`
               : `创建文件 ${filePath}。`;
-        const ok = await confirmOperation(ctx, "确认文件修改", approvalMessage({
+        const ok = await adjudicate(ctx, "确认文件修改", approvalMessage({
           action: writeAction,
           worthWhen: "这是当前任务需要修改的文件，并且现有内容已保留、可恢复或确定不再需要。",
           risks: unique(reasons).map(readableRisk),
@@ -1025,14 +1167,27 @@ export default function (pi: ExtensionAPI) {
           tool: event.toolName,
           path: filePath,
           reasons,
-        }, { toolCallId: event.toolCallId, toolName: event.toolName });
-        if (!ok) return { block: true, reason: `Write blocked by pi-safe-operation: ${reasons.join("; ")}` };
+        }, { toolCallId: event.toolCallId, toolName: event.toolName },
+          `Write blocked by pi-safe-operation: ${reasons.join("; ")}`, event);
+        if (ok !== true) return { block: true, reason: ok };
         return;
       }
 
       if (!(event.toolName === "bash" && isToolCallEventType("bash", event))) return;
       const command = event.input.command ?? "";
       if (!command) return;
+
+      if (planMode.isPlanningPhase() && !isSafePlanCommand(command)) {
+        blockedTotal += 1;
+        audit("blocked-plan-phase-command", { tool: "bash", command: redactText(command).text });
+        return {
+          block: true,
+          reason:
+            "Plan mode is active (planning phase): command is not on the read-only allowlist. " +
+            "Finish the plan and let the user approve it, or ask the user to run /plan to exit plan mode.\n\n" +
+            commandSummary(command),
+        };
+      }
 
       if (hasDeleteIntent(command)) {
         const complexity = shellComplexity(command);
@@ -1055,7 +1210,7 @@ export default function (pi: ExtensionAPI) {
           };
         }
         if (parsed.kind === "git-clean") {
-          const ok = await confirmOperation(
+          const ok = await adjudicate(
             ctx,
             "确认清理 Git 未跟踪文件",
             approvalMessage({
@@ -1071,8 +1226,10 @@ export default function (pi: ExtensionAPI) {
             }),
             { tool: "bash", operation: "git-clean", command: redactText(command).text },
             { toolCallId: event.toolCallId, toolName: event.toolName },
+            "git clean blocked by pi-safe-operation",
+            event,
           );
-          if (!ok) return { block: true, reason: "git clean blocked by pi-safe-operation" };
+          if (ok !== true) return { block: true, reason: ok };
           return;
         }
         if (parsed.targets.length === 0) {
@@ -1121,7 +1278,7 @@ export default function (pi: ExtensionAPI) {
               `Strict mode requires safe_delete for project deletion.\n\nTargets:\n${targetLines(targets)}`,
           };
         }
-        const ok = await confirmOperation(
+        const ok = await adjudicate(
           ctx,
           "确认永久删除",
           approvalMessage({
@@ -1139,8 +1296,10 @@ export default function (pi: ExtensionAPI) {
           }),
           { tool: "bash", operation: "delete", targets: targets.map((target) => target.relative) },
           { toolCallId: event.toolCallId, toolName: event.toolName },
+          "Permanent deletion blocked by pi-safe-operation",
+          event,
         );
-        if (!ok) return { block: true, reason: "Permanent deletion blocked by pi-safe-operation" };
+        if (ok !== true) return { block: true, reason: ok };
         return;
       }
 
@@ -1152,10 +1311,30 @@ export default function (pi: ExtensionAPI) {
         if (protectedPattern) reasons.push(`mutation references protected path: ${protectedPattern}`);
         if (knowledgeDir) reasons.push(`code mutation references vault knowledge directory: ${knowledgeDir}/`);
       }
-      if (reasons.length === 0) return;
+      if (reasons.length === 0) {
+        if (config.permissionMode === "auto" && config.judge.auditSafeOps && looksLikeMutatingBash(command)) {
+          const safeVerdict = await adjudicate(
+            ctx,
+            "裁判审计：变更命令",
+            approvalMessage({
+              action: "执行变更类 Bash 命令（未被确定性规则标记，按 judge.auditSafeOps 送审）。",
+              worthWhen: "这是当前任务需要的命令。",
+              risks: ["纵深防御审计：该命令未被规则标记，由裁判模型复核。"],
+              saferChoice: "不确定时先取消。",
+              technicalDetails: redactText(command).text,
+            }),
+            { tool: "bash", operation: "mutation-audit", reasons: [], command: redactText(command).text },
+            { toolCallId: event.toolCallId, toolName: event.toolName },
+            "Command blocked by pi-safe-operation (judge.auditSafeOps)",
+            event,
+          );
+          if (safeVerdict !== true) return { block: true, reason: safeVerdict };
+        }
+        return;
+      }
       const uniqueReasons = unique(reasons);
       const operationCopy = operationCopyForReasons(uniqueReasons);
-      const ok = await confirmOperation(
+      const ok = await adjudicate(
         ctx,
         "确认高风险操作",
         approvalMessage({
@@ -1165,8 +1344,10 @@ export default function (pi: ExtensionAPI) {
         }),
         { tool: "bash", operation: "dangerous-command", reasons: uniqueReasons, command: redactText(command).text },
         { toolCallId: event.toolCallId, toolName: event.toolName },
+        `Command blocked by pi-safe-operation: ${uniqueReasons.join("; ")}`,
+        event,
       );
-      if (!ok) return { block: true, reason: `Command blocked by pi-safe-operation: ${uniqueReasons.join("; ")}` };
+      if (ok !== true) return { block: true, reason: ok };
     } catch (error) {
       blockedTotal += 1;
       const reason = error instanceof Error ? error.message : safeStringify(error);
@@ -1790,4 +1971,11 @@ export default function (pi: ExtensionAPI) {
       );
     },
   });
+
+  // Permission-mode runtime (plan-mode state machine). Registered LAST so this
+  // package's own session_start (config load) and context (redaction) handlers
+  // keep their registration order ahead of permission-mode's handlers: config
+  // must be loaded before permission-mode reads getPermissionMode(), and the
+  // egress redaction pass stays the first context transform.
+  const planMode = setupPermissionMode(pi, { getPermissionMode: () => config.permissionMode });
 }
