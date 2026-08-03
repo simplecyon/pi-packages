@@ -1277,6 +1277,7 @@ test("auto mode allows a flagged write when the judge allows", async () => {
     const result = await flaggedOverwrite(extension, autoTestContext(tmp, registry, confirms));
     assert.equal(result, undefined);
     assert.equal(calls.length, 1);
+    assert.equal((calls[0].options as any).temperature, undefined);
     assert.equal(confirms.length, 0);
     const userText = (calls[0].context as any).messages[0].content[0].text as string;
     assert.match(userText, /<untrusted-operation>/);

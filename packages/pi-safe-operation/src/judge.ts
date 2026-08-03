@@ -380,7 +380,6 @@ export async function judgeAdjudicate(params: {
           headers: auth.headers,
           env: auth.env,
           maxTokens: judgeConfig.maxTokens,
-          temperature: 0,
           reasoning,
           signal: AbortSignal.timeout(judgeConfig.timeoutMs),
         },
