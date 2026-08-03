@@ -1209,7 +1209,7 @@ export default function (pi: ExtensionAPI) {
             : theme.fg("dim", truncateToWidth(stats, Math.max(0, width - modelWidth - 1), "...")) + " " + theme.fg("dim", modelText);
 
           const extensionStatuses = [...footerData.getExtensionStatuses().entries()]
-            .filter(([key]: [string, string]) => key !== "permission-mode")
+            .filter(([key]: [string, string]) => key !== "interaction-mode")
             .sort(([a]: [string, string], [b]: [string, string]) => a.localeCompare(b))
             .map(([, text]: [string, string]) => text.replace(/[\\r\\n\\t]/g, " ").replace(/ +/g, " ").trim());
           return extensionStatuses.length > 0
