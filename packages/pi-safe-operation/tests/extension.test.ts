@@ -1052,8 +1052,9 @@ test("plan approval gate enters the execution phase and tracks progress", async 
     assert.ok(beforeAgentStart);
     assert.ok(turnEnd);
 
-    const planningInjection = await beforeAgentStart({ type: "before_agent_start" }, baseContext(tmp, true));
-    assert.match(planningInjection?.message?.content ?? "", /\[PLAN MODE ACTIVE\]/);
+    const planningInjection = await beforeAgentStart({ type: "before_agent_start", systemPrompt: "base" }, baseContext(tmp, true));
+    assert.match(planningInjection?.systemPrompt ?? "", /你处于 Plan mode/);
+    assert.equal(planningInjection?.message, undefined);
 
     await approvePlan(extension, tmp);
 
@@ -1065,8 +1066,10 @@ test("plan approval gate enters the execution phase and tracks progress", async 
     assert.ok(execMessage);
     assert.equal((execMessage.options as any)?.triggerTurn, true);
 
-    const executionInjection = await beforeAgentStart({ type: "before_agent_start" }, baseContext(tmp, true));
-    assert.match(executionInjection?.message?.content ?? "", /\[EXECUTING PLAN/);
+    const executionInjection = await beforeAgentStart({ type: "before_agent_start", systemPrompt: "base" }, baseContext(tmp, true));
+    assert.match(executionInjection?.systemPrompt ?? "", /正在执行已批准的计划/);
+    assert.equal(executionInjection?.message, undefined);
+    assert.equal((execMessage.message as any).display, false);
 
     await turnEnd(
       { type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "Step one done [DONE:1]" }] } },
@@ -1552,6 +1555,34 @@ test("project auditSafeOps uses the user-pinned judge for unflagged mutations", 
   }
 });
 
+test("auto judge retries an empty reasoning response once with reasoning off", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-empty-retry-"));
+  const restoreHome = withGlobalConfig({
+    interactionMode: "auto",
+    judge: { provider: "test-provider", model: "j1", reasoning: "low" },
+  });
+  let calls = 0;
+  installFakeJudge(async () => {
+    calls += 1;
+    return calls === 1
+      ? { content: [{ type: "thinking", thinking: "used all output budget" }], stopReason: "length" }
+      : judgeVerdictResponse({ verdict: "allow", riskLevel: "low", rationale: "retry returned JSON" });
+  });
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const { registry } = fakeJudgeRegistry();
+    const result = await flaggedOverwrite(extension, autoTestContext(tmp, registry, []));
+    assert.equal(result, undefined);
+    assert.equal(calls, 2);
+  } finally {
+    __setJudgeCompleteForTests(null);
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Config commands: /permission-mode and /judge-model
 // ---------------------------------------------------------------------------
@@ -1649,6 +1680,68 @@ test("mode command rejects an unknown mode without writing", async () => {
     assert.equal(notices[0].level, "error");
     assert.match(notices[0].message, /未知 interaction mode: yolo/);
     assert.equal(savedGlobalConfig(restoreHome.tmpHome).interactionMode, undefined);
+  } finally {
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("a live session refreshes the globally selected judge before cycling into auto", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-cross-session-"));
+  const restoreHome = withGlobalConfig({
+    interactionMode: "accept-edits",
+    judge: { provider: "test-provider", model: "j1" },
+  });
+  const models = [
+    { provider: "test-provider", id: "j1" },
+    { provider: "test-provider", id: "j2" },
+  ];
+  const registry = {
+    find: (provider: string, id: string) => models.find((model) => model.provider === provider && model.id === id),
+    hasConfiguredAuth: () => true,
+    getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "<redacted:credential#719ce3>" }),
+  };
+  const calls = installFakeJudge(async () => judgeVerdictResponse({ verdict: "allow", riskLevel: "low", rationale: "ok" }));
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
+    const sessionA = await loadSafeOperation(tmp);
+    const sessionB = await loadSafeOperation(tmp);
+    await runSessionStart(sessionA, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    await runSessionStart(sessionB, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+
+    const judgeCommand = sessionA.commands.get("judge-model") as { handler: (args: unknown, ctx: any) => Promise<void> };
+    await judgeCommand.handler("test-provider/j2", notifyCapturingContext(tmp, [], registry));
+
+    const shortcut = sessionB.shortcuts.get("alt+m") as { handler: (ctx: any) => Promise<void> };
+    await shortcut.handler(notifyCapturingContext(tmp, [], registry));
+    const result = await flaggedOverwrite(sessionB, autoTestContext(tmp, registry, []));
+    assert.equal(result, undefined);
+    assert.equal((calls[0].model as any).id, "j2");
+  } finally {
+    __setJudgeCompleteForTests(null);
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("judge-model picker identifies the current configured model", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-picker-current-"));
+  const restoreHome = withGlobalConfig({ judge: { provider: "test-provider", model: "j1" } });
+  try {
+    const extension = await loadSafeOperation(tmp);
+    const { registry } = fakeJudgeRegistry();
+    (registry as any).getAvailable = () => [
+      { provider: "test-provider", id: "j1" },
+      { provider: "test-provider", id: "j2" },
+    ];
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const command = extension.commands.get("judge-model") as { handler: (args: unknown, ctx: any) => Promise<void> };
+    let title = "";
+    await command.handler("", {
+      ...notifyCapturingContext(tmp, [], registry),
+      ui: { ...baseContext(tmp, true).ui, select: async (nextTitle: string) => { title = nextTitle; return undefined; } },
+    });
+    assert.match(title, /current: test-provider\/j1/);
   } finally {
     restoreHome();
     fs.rmSync(tmp, { recursive: true, force: true });

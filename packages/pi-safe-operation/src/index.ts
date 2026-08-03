@@ -2093,6 +2093,13 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // A session holds config in memory, while /mode and /judge-model intentionally
+  // persist at user scope. Refresh before a user-triggered decision so a second
+  // live session observes changes made by the first without a restart.
+  function refreshRuntimeConfig(ctx: any): void {
+    config = loadConfig(ctx.cwd ?? root, ctx.isProjectTrusted?.() ?? true);
+  }
+
   // Shared by /mode, the legacy /permission-mode alias, and alt+m. The global
   // config persists the user-visible interaction mode; legacy permissionMode is
   // read on startup but never written again.
@@ -2118,6 +2125,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerShortcut("alt+m", {
     description: "Cycle interaction mode (chat → plan → accept-edits → auto)",
     handler: async (ctx) => {
+      refreshRuntimeConfig(ctx);
       const index = INTERACTION_MODE_CYCLE.indexOf(config.interactionMode);
       const next = INTERACTION_MODE_CYCLE[(index + 1) % INTERACTION_MODE_CYCLE.length];
       await applyInteractionMode(next, ctx);
@@ -2156,7 +2164,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("judge-model", {
     description: "Show or set the auto-mode judge model (<provider>/<model>); persists to the global config",
     handler: async (args, ctx) => {
-      const value = (args ?? "").trim();
+      refreshRuntimeConfig(ctx);
+      const value = typeof args === "string" ? args.trim() : "";
       if (!value) {
         if (!ctx.hasUI) {
           ctx.ui.notify(
@@ -2178,14 +2187,23 @@ export default function (pi: ExtensionAPI) {
           // Keep the synchronous registry snapshot if a refresh is unavailable.
         }
         const models = typeof registry?.getAvailable === "function" ? registry.getAvailable() : [];
-        const choices = [...models]
+        const currentJudge = config.judge.provider && config.judge.model
+          ? `${config.judge.provider}/${config.judge.model}`
+          : undefined;
+        const sortedChoices = [...models]
           .map((model: any) => `${model.provider}/${model.id}`)
           .sort((a: string, b: string) => a.localeCompare(b));
+        const choices = currentJudge && sortedChoices.includes(currentJudge)
+          ? [currentJudge, ...sortedChoices.filter((choice: string) => choice !== currentJudge)]
+          : sortedChoices;
         if (choices.length === 0) {
           ctx.ui.notify("没有可用模型，无法配置 judge。请先用 /models 或 /login 配置模型。", "error");
           return;
         }
-        const selected = await ctx.ui.select("Select judge model", choices);
+        const selected = await ctx.ui.select(
+          currentJudge ? `Select judge model (current: ${currentJudge})` : "Select judge model (current: default candidates)",
+          choices,
+        );
         if (!selected) return;
         const slash = selected.indexOf("/");
         if (slash <= 0 || slash === selected.length - 1) return;

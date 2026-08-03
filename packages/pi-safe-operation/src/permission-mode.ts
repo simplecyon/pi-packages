@@ -274,6 +274,9 @@ export function setupPermissionMode(
   let planModeEnabled = false;
   let executionMode = false;
   let todoItems: TodoItem[] = [];
+  // Prevent repeated agent_end events from opening duplicate approval pickers
+  // for the same plan.
+  let approvalPromptOpen = false;
   let toolsBeforePlanMode: string[] | undefined;
   let taskExtensionAvailable = false;
 
@@ -414,66 +417,30 @@ export function setupPermissionMode(
     handler: async (ctx: ExtensionContext) => togglePlanMode(ctx),
   });
 
-  // Inject plan/execution guidance before the agent starts a turn.
-  pi.on("before_agent_start", async () => {
+  // Guidance is appended to the system prompt rather than stored as a custom
+  // session message. The latter can leak raw Runtime instructions into chat.
+  function appendGuidance(event: any, guidance: string): { systemPrompt: string } {
+    const base = typeof event.systemPrompt === "string" ? event.systemPrompt : "";
+    return { systemPrompt: `${base}\n\n${guidance}` };
+  }
+
+  pi.on("before_agent_start", async (event) => {
     if (planModeEnabled) {
-      return {
-        message: {
-          customType: PLAN_CONTEXT_TYPE,
-          content: `${PLAN_MARKER}
-You are in plan mode - a read-only exploration phase before any changes are made.
+      return appendGuidance(event, `你处于 Plan mode：这是只读探索阶段，尚未批准任何变更。
 
-Restrictions:
-- Built-in edit and write tools are disabled
-- safe_delete is disabled
-- Bash is restricted to an allowlist of read-only commands
-- safe-operation's hard safety blocks still apply
+限制：edit/write/safe_delete 已禁用；Bash 仅允许只读命令；所有 hard safety block 继续生效。需求存在歧义时，先向用户提问。
 
-Ask clarifying questions using the questionnaire tool when requirements are ambiguous.
-
-Create a detailed numbered plan under a "Plan:" header:
-
-Plan:
-1. First step description
-2. Second step description
-...
-
-Do NOT attempt to make changes - just describe what you would do. The user will
-be asked to approve the plan, and execution starts only after approval.`,
-          display: false,
-        },
-      };
+完成探索后，以 \`Plan:\` 标题输出编号计划。每一步必须写清目标范围、预期变更、风险或待决事项、验证方式；不要尝试修改文件。用户批准后会明确选择以 Accept edits 或 Auto 执行。`);
     }
 
     if (executionMode && todoItems.length > 0) {
       const remaining = todoItems.filter((todo) => !todo.completed);
       const todoList = remaining.map((todo) => `${todo.step}. ${todo.text}`).join("\n");
-      return {
-        message: {
-          customType: EXEC_CONTEXT_TYPE,
-          content: `${EXEC_MARKER} - Full tool access enabled]
-
-Remaining steps:
-${todoList}
-
-Execute each step in order.
-After completing a step, include a [DONE:n] tag in your response.`,
-          display: false,
-        },
-      };
+      return appendGuidance(event, `你正在执行已批准的计划。\n\n剩余步骤：\n${todoList}\n\n按顺序执行，每完成一步在回复中加入 \`[DONE:n]\`。完成前运行计划中承诺的验证。`);
     }
 
     if (opts.getInteractionMode() === "auto") {
-      return {
-        message: {
-          customType: "pi-safe-operation:auto-context",
-          content: `[AUTO MODE]
-Continue until the task has verified completion, no policy-compliant path remains, or only the user can supply a preference, authorization, or missing information.
-
-Technical uncertainty is not a reason to stop: inspect, test, and try a safer alternative. Treat judge and policy feedback as a constraint on the intended effect; revise the plan instead of retrying an equivalent action. Do not ask the user to approve a technical operation that the judge rejected.`,
-          display: false,
-        },
-      };
+      return appendGuidance(event, `你处于 Auto mode。持续推进，直到验收已验证、没有 policy-compliant 路径，或仅用户能提供偏好、授权或缺失信息。技术不确定性应触发读取、测试和更安全的替代方案。judge 或 policy 拦截是对预期效果的约束：重做方案，不要以等效操作重试，也不要让用户确认 judge 已拒绝的技术操作。`);
     }
   });
 
@@ -578,18 +545,13 @@ Technical uncertainty is not a reason to stop: inspect, test, and try a safer al
       }
     }
 
-    if (todoItems.length === 0) return;
+    if (todoItems.length === 0 || approvalPromptOpen) return;
     persistState();
 
     updateStatus(ctx);
+    approvalPromptOpen = true;
     const choice = await askPlanDecision(ctx);
-
-    const todoListText = todoItems.map((todo, i) => `${i + 1}. ☐ ${todo.text}`).join("\n");
-    const planTodoListMessage = {
-      customType: PLAN_LIST_TYPE,
-      content: `**Plan Steps (${todoItems.length}):**\n\n${todoListText}`,
-      display: true,
-    };
+    approvalPromptOpen = false;
 
     if (choice === "Execute in Auto mode" || choice === "Execute in Accept edits mode") {
       const firstTodoItem = todoItems[0];
@@ -608,23 +570,13 @@ Technical uncertainty is not a reason to stop: inspect, test, and try a safer al
       updateStatus(ctx);
       persistState();
 
-      const remainingList = todoItems.map((todo) => `${todo.step}. ${todo.text}`).join("\n");
-      const execMessage = `Execute the plan.
-
-Remaining steps:
-${remainingList}
-
-Start with: ${firstTodoItem.text}
-After completing a step, include a [DONE:n] tag in your response.`;
-      pi.sendMessage(planTodoListMessage, { deliverAs: "followUp" });
       pi.sendMessage(
-        { customType: EXECUTE_TYPE, content: execMessage, display: true },
+        { customType: EXECUTE_TYPE, content: "Execute the approved plan.", display: false },
         { triggerTurn: true, deliverAs: "followUp" },
       );
     } else if (choice === "Chat about this plan") {
       const refinement = await ctx.ui.editor("Chat about this plan:", "");
       if (refinement?.trim()) {
-        pi.sendMessage(planTodoListMessage, { deliverAs: "followUp" });
         pi.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
       }
     }

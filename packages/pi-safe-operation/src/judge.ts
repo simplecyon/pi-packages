@@ -48,9 +48,11 @@ export interface JudgeConfig {
 export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
   provider: undefined,
   model: undefined,
-  maxTokens: 1024,
+  maxTokens: 2048,
   timeoutMs: 20000,
-  reasoning: "low",
+  // A judge needs a short structured text response; reasoning budgets can
+  // consume small output limits and leave an otherwise successful call empty.
+  reasoning: "off",
   auditSafeOps: true,
   onFailure: "escalate",
 };
@@ -353,37 +355,52 @@ export async function judgeAdjudicate(params: {
   const startedAt = Date.now();
 
   let responseText = "";
+  let lastResponse: any;
+  let attempts = 0;
   try {
-    const response = await deps.complete(
-      resolved.model,
-      {
-        systemPrompt: JUDGE_SYSTEM_PROMPT,
-        messages: [
-          {
-            role: "user",
-            content: [{ type: "text", text: buildJudgeUserMessage(request) }],
-            timestamp: Date.now(),
-          },
-        ],
-      },
-      {
-        apiKey: auth.apiKey,
-        headers: auth.headers,
-        env: auth.env,
-        maxTokens: judgeConfig.maxTokens,
-        temperature: 0,
-        reasoning: judgeConfig.reasoning,
-        signal: AbortSignal.timeout(judgeConfig.timeoutMs),
-      },
-    );
-    responseText = extractResponseText(response);
+    const reasoningAttempts = judgeConfig.reasoning === "off"
+      ? ["off" as const]
+      : [judgeConfig.reasoning, "off" as const];
+    for (const reasoning of reasoningAttempts) {
+      attempts += 1;
+      lastResponse = await deps.complete(
+        resolved.model,
+        {
+          systemPrompt: JUDGE_SYSTEM_PROMPT,
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "text", text: buildJudgeUserMessage(request) }],
+              timestamp: Date.now(),
+            },
+          ],
+        },
+        {
+          apiKey: auth.apiKey,
+          headers: auth.headers,
+          env: auth.env,
+          maxTokens: judgeConfig.maxTokens,
+          temperature: 0,
+          reasoning,
+          signal: AbortSignal.timeout(judgeConfig.timeoutMs),
+        },
+      );
+      responseText = extractResponseText(lastResponse);
+      if (responseText.trim() || reasoning === "off") break;
+    }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return failClosed(`judge call failed: ${deps.redact(reason)}`);
   }
 
   const latencyMs = Date.now() - startedAt;
-  if (!responseText.trim()) return failClosed("judge returned an empty response");
+  if (!responseText.trim()) {
+    const stopReason = typeof lastResponse?.stopReason === "string" ? lastResponse.stopReason : "unknown";
+    const errorMessage = typeof lastResponse?.errorMessage === "string"
+      ? `; error: ${deps.redact(lastResponse.errorMessage)}`
+      : "";
+    return failClosed(`judge returned an empty response after ${attempts} attempt(s) (stopReason: ${stopReason}${errorMessage})`);
+  }
 
   const verdict = parseJudgeVerdict(responseText);
   if (!verdict) return failClosed("judge verdict unparseable or outside the allowed schema");
