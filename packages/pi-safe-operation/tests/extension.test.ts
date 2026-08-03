@@ -1824,8 +1824,8 @@ test("judge-model command rejects unresolvable models and bad formats without wr
   }
 });
 
-test("interaction-mode shortcut uses ctrl+m on macOS and alt+m elsewhere", () => {
-  assert.equal(interactionModeShortcut("darwin"), "ctrl+m");
+test("interaction-mode shortcut avoids the Enter collision on macOS", () => {
+  assert.equal(interactionModeShortcut("darwin"), "ctrl+alt+m");
   assert.equal(interactionModeShortcut("win32"), "alt+m");
   assert.equal(interactionModeShortcut("linux"), "alt+m");
 });

@@ -179,9 +179,12 @@ const BASH_REDACTION_OWNER_AVAILABLE = "simplecyon:bash-redaction-owner:availabl
 const TOOL_RUNTIME_APPROVAL_END = "simplecyon:tool-runtime:approval-end";
 const DEFAULT_BASH_TIMEOUT_SECONDS = 30;
 
-/** macOS terminals reserve Alt for Option input; keep the mode cycle reachable. */
-export function interactionModeShortcut(platform = process.platform): "alt+m" | "ctrl+m" {
-  return platform === "darwin" ? "ctrl+m" : "alt+m";
+/**
+ * Ctrl+M is carriage return in common macOS terminals and therefore collides
+ * with Enter. Use Control+Option+M there; other platforms keep Alt+M.
+ */
+export function interactionModeShortcut(platform = process.platform): "alt+m" | "ctrl+alt+m" {
+  return platform === "darwin" ? "ctrl+alt+m" : "alt+m";
 }
 
 // The judge completion is resolved lazily from the host's pi-ai at runtime (pi's
