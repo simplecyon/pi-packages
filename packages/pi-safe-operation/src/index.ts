@@ -1936,6 +1936,39 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // Shared by /permission-mode and the shift+tab cycle shortcut: persist to the
+  // global config, apply in-memory for the current session, and tell the user
+  // what changed.
+  async function applyPermissionMode(mode: PermissionMode, ctx: any): Promise<void> {
+    if (!persistGlobalConfig((raw) => { raw.permissionMode = mode; })) {
+      ctx.ui.notify(`写入全局配置失败: ${globalConfigFilePath()}`, "error");
+      return;
+    }
+    config.permissionMode = mode;
+    const lines = [`permission mode 已设为 ${mode}（已写入全局配置，本会话即时生效）。`];
+    if (mode === "plan") {
+      lines.push("plan 的只读工具门在会话开始时生效；要立即进入规划阶段请使用 /plan 或 ctrl+alt+p。");
+    }
+    if (mode === "auto") {
+      lines.push(
+        config.judge.provider && config.judge.model
+          ? `裁判模型: ${config.judge.provider}/${config.judge.model}（/judge-model 可修改）。`
+          : "裁判模型: 内置默认候选（按 modelRegistry + auth 解析）；建议用 /judge-model 显式指定。",
+      );
+    }
+    ctx.ui.notify(lines.join("\n"), "info");
+  }
+
+  const PERMISSION_MODE_CYCLE: PermissionMode[] = ["ask", "plan", "auto"];
+  pi.registerShortcut("shift+tab", {
+    description: "Cycle permission mode (ask → plan → auto)",
+    handler: async (ctx) => {
+      const index = PERMISSION_MODE_CYCLE.indexOf(config.permissionMode);
+      const next = PERMISSION_MODE_CYCLE[(index + 1) % PERMISSION_MODE_CYCLE.length];
+      await applyPermissionMode(next, ctx);
+    },
+  });
+
   pi.registerCommand("permission-mode", {
     description: "Show or set permission mode (ask | plan | auto); persists to the global config",
     handler: async (args, ctx) => {
@@ -1945,7 +1978,7 @@ export default function (pi: ExtensionAPI) {
           [
             `permission mode: ${config.permissionMode}`,
             `judge: ${config.judge.provider && config.judge.model ? `${config.judge.provider}/${config.judge.model}` : "内置默认候选（按 modelRegistry + auth 解析）"}`,
-            "设置: /permission-mode ask|plan|auto（写入全局配置，本会话即时生效）",
+            "设置: /permission-mode ask|plan|auto（写入全局配置，本会话即时生效）；shift+tab 循环切换。",
           ].join("\n"),
           "info",
         );
@@ -1955,24 +1988,7 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify(`未知 permission mode: ${value}。可选: ask | plan | auto`, "error");
         return;
       }
-      const mode = value as PermissionMode;
-      if (!persistGlobalConfig((raw) => { raw.permissionMode = mode; })) {
-        ctx.ui.notify(`写入全局配置失败: ${globalConfigFilePath()}`, "error");
-        return;
-      }
-      config.permissionMode = mode;
-      const lines = [`permission mode 已设为 ${mode}（已写入全局配置，本会话即时生效）。`];
-      if (mode === "plan") {
-        lines.push("plan 的只读工具门在会话开始时生效；要立即进入规划阶段请使用 /plan。");
-      }
-      if (mode === "auto") {
-        lines.push(
-          config.judge.provider && config.judge.model
-            ? `裁判模型: ${config.judge.provider}/${config.judge.model}（/judge-model 可修改）。`
-            : "裁判模型: 内置默认候选（按 modelRegistry + auth 解析）；建议用 /judge-model 显式指定。",
-        );
-      }
-      ctx.ui.notify(lines.join("\n"), "info");
+      await applyPermissionMode(value as PermissionMode, ctx);
     },
   });
 

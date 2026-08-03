@@ -1601,3 +1601,46 @@ test("judge-model command rejects unresolvable models and bad formats without wr
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test("shift+tab cycles ask → plan → auto → ask with persistence and immediate effect", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-shortcut-cycle-"));
+  const restoreHome = withGlobalConfig({ judge: { provider: "test-provider", model: "j1" } });
+  const calls = installFakeJudge(async () =>
+    judgeVerdictResponse({ verdict: "allow", riskLevel: "low", rationale: "常规项目文件编辑" }));
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const shortcut = extension.shortcuts.get("shift+tab") as { handler: (ctx: any) => Promise<void> };
+    assert.ok(shortcut);
+    const { registry } = fakeJudgeRegistry();
+    const notices: Array<{ message: string; level: string }> = [];
+    const ctx = notifyCapturingContext(tmp, notices, registry);
+
+    // ask → plan
+    await shortcut.handler(ctx);
+    assert.equal(savedGlobalConfig(restoreHome.tmpHome).permissionMode, "plan");
+    assert.ok(notices.some((n) => /已设为 plan/.test(n.message) && /ctrl\+alt\+p/.test(n.message)));
+
+    // plan → auto
+    await shortcut.handler(ctx);
+    assert.equal(savedGlobalConfig(restoreHome.tmpHome).permissionMode, "auto");
+    assert.ok(notices.some((n) => /已设为 auto/.test(n.message)));
+
+    // In-memory effect without restart: the flagged write goes to the judge.
+    const confirms: ConfirmRecord[] = [];
+    const result = await flaggedOverwrite(extension, autoTestContext(tmp, registry, confirms));
+    assert.equal(result, undefined);
+    assert.equal(calls.length, 1);
+    assert.equal(confirms.length, 0);
+
+    // auto → ask
+    await shortcut.handler(ctx);
+    assert.equal(savedGlobalConfig(restoreHome.tmpHome).permissionMode, "ask");
+    assert.ok(notices.some((n) => /已设为 ask/.test(n.message)));
+  } finally {
+    __setJudgeCompleteForTests(null);
+    restoreHome();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
