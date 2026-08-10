@@ -10,6 +10,7 @@ import {
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { AttachmentComposer } from "./attachments.ts";
 import { CompactDiffComponent } from "./diff.ts";
 import { ActionGroupCoordinator } from "./grouping.ts";
 import { formatErrorOutcome } from "./outcome.ts";
@@ -210,6 +211,10 @@ export default function minimalTuiExtension(pi: ExtensionAPI): void {
 	announceBashRedactionOwner();
 
 	pi.on("session_start", (_event, context) => {
+		// Don't replace an editor owned by another extension; Pi supports one editor factory.
+		if (!context.ui.getEditorComponent()) {
+			context.ui.setEditorComponent((tui, theme, keybindings) => new AttachmentComposer(tui, theme, keybindings));
+		}
 		autoApprovedToolCalls.clear();
 		autoApprovalInvalidators.clear();
 		grouping.rebuild(context.sessionManager.getBranch());

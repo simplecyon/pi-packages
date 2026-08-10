@@ -43,6 +43,13 @@ seconds.
 - `Ctrl+O` continues to use Pi's native expanded state and restores full native
   output, including syntax highlighting, images, errors, timing, and complete
   diffs.
+- Pasted file paths are promoted into removable attachment cards above the
+  editor. Clipboard images already written by Pi to a temporary file receive an
+  `IMG` card; compatible terminals render a small preview, while Windows
+  Terminal and other text-only terminals fall back to filename, type, and size.
+  `Alt+Backspace` removes the last attachment and its standalone path line.
+  Pi still submits the original remaining paths as text, so the feature does not
+  alter model context or file-access semantics.
 - `cyon-minimal-dark` gives user messages a subtle cool-gray highlight while
   keeping tool and custom-message surfaces quiet. User-message highlights omit
   Pi's default blank row above the content and replace the full bottom padding
