@@ -32,8 +32,9 @@
       "./packages/pi-context-compact/src/index.ts",
       "./packages/pi-context-inspector/index.ts",
       "./packages/pi-session-tasks/src/index.ts",
-      "./packages/pi-skill-telemetry/src/index.ts"
-    ],
+      "./packages/pi-skill-telemetry/src/index.ts",
+      "./packages/pi-skill-anywhere/src/index.ts"
+],
     "skills": [
       "./packages/pi-memory/skills"
     ],
