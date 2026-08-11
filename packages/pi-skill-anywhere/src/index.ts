@@ -163,13 +163,13 @@ class SkillAnywhereEditor extends CustomEditor {
 	getTheme: () => ThemeWithFg | undefined = () => undefined;
 
 	/**
-	 * Override insertCharacter so that typing "/" (or continuing to type after a
-	 * mid-line "/") triggers the slash autocomplete menu — not only at line
-	 * start. The base editor's own trigger logic restricts "/" to
-	 * isAtStartOfMessage() and explicitly excludes "/" from trigger characters,
-	 * so mid-line the provider's getSuggestions is never called. We call super
-	 * first (preserving all undo/onChange/state logic), then trigger if the
-	 * base didn't already and a mid-line slash token is at the cursor.
+	 * Override insertCharacter so that typing "/" (or continuing to type after
+	 * a "/") triggers the slash autocomplete menu at any position — not only
+	 * at line start. The base editor excludes "/" from its trigger characters,
+	 * so without this override the provider's getSuggestions is never called.
+	 * We call super first (preserving all undo/onChange/state logic), then
+	 * trigger if the base didn't already (checked via autocompleteState) and a
+	 * slash token is at the cursor.
 	 */
 	insertCharacter(char: string, skipUndoCoalescing?: boolean): void {
 		// @ts-expect-error - super.insertCharacter is private; accessible at runtime
@@ -181,10 +181,11 @@ class SkillAnywhereEditor extends CustomEditor {
 			const line = this.state.lines[this.state.cursorLine] || "";
 			// @ts-expect-error - state is private; accessible at runtime
 			const before = line.slice(0, this.state.cursorCol);
-			// Trigger slash completion for mid-line "/" tokens (preceded by
-			// whitespace) too, not just at the start of the message.
-			// @ts-expect-error - isAtStartOfMessage is private; accessible at runtime
-			if (!this.isAtStartOfMessage() && SLASH_TOKEN_RE.test(before)) {
+			// Trigger slash completion for "/" tokens at any position —
+			// mid-line (after whitespace) AND at line start. The
+			// autocompleteState check above prevents double-triggering if
+			// super.insertCharacter already opened the menu.
+			if (SLASH_TOKEN_RE.test(before)) {
 				// @ts-expect-error - tryTriggerAutocomplete is private; accessible at runtime
 				this.tryTriggerAutocomplete();
 			}
