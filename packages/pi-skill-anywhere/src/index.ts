@@ -231,13 +231,6 @@ export default function (pi: ExtensionAPI): void {
 			editor.getTheme = () => fullTheme;
 			return editor;
 		});
-
-		// Visible startup marker so the user can confirm the extension loaded.
-		try {
-			ctx.ui.setStatus("skill-anywhere", "ready");
-		} catch {
-			// setStatus not available in this ctx — non-fatal.
-		}
 	});
 
 	// Part 2: on submit, detect a mid-line /skill:name token, store it for
