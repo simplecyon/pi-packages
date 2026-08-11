@@ -1,4 +1,4 @@
-import { estimateContentTokens, estimateTextTokens } from "@simplecyon/pi-context-core";
+import { estimateContentTokens, estimateTextTokens } from "../../pi-context-core/src/index.ts";
 import type {
 	ArtifactDecision,
 	ArtifactPolicy,

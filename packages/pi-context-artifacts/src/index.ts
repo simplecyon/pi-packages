@@ -1,7 +1,7 @@
 import {
 	estimateTextTokens,
 	TOKEN_ROI_ARTIFACT_EVENT,
-} from "@simplecyon/pi-context-core";
+} from "../../pi-context-core/src/index.ts";
 import { lstat, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, resolve } from "node:path";

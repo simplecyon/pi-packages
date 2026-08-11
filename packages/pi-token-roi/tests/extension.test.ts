@@ -11,7 +11,7 @@ import type {
 import {
 	TOKEN_ROI_ARTIFACT_EVENT,
 	TOKEN_ROI_MILESTONE_EVENT,
-} from "@simplecyon/pi-context-core";
+} from "../../pi-context-core/src/index.ts";
 import tokenRoiExtension, { parseExportPath } from "../src/index.ts";
 
 test("only accepts an exact --json export flag", () => {

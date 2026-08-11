@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
 	estimateTextTokens,
-} from "@simplecyon/pi-context-core";
+} from "../../pi-context-core/src/index.ts";
 import type {
 	ExtensionAPI,
 	ExtensionContext,

@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
-import { TOKEN_ROI_MILESTONE_EVENT } from "@simplecyon/pi-context-core";
+import { TOKEN_ROI_MILESTONE_EVENT } from "../../pi-context-core/src/index.ts";
 
 const globalRoot = execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim();
 const loaderUrl = pathToFileURL(

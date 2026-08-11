@@ -8,7 +8,7 @@ import {
 	TOKEN_ROI_MILESTONE_EVENT,
 	TokenRoiTracker,
 	type TokenRoiSnapshot,
-} from "@simplecyon/pi-context-core";
+} from "../../pi-context-core/src/index.ts";
 import type {
 	ExtensionAPI,
 	ExtensionCommandContext,

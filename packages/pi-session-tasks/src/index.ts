@@ -1,6 +1,6 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { TOKEN_ROI_MILESTONE_EVENT } from "@simplecyon/pi-context-core";
+import { TOKEN_ROI_MILESTONE_EVENT } from "../../pi-context-core/src/index.ts";
 import { Type } from "typebox";
 import {
 	MAX_TASKS,
