@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import {
 	isAbsolute,
@@ -40,6 +40,26 @@ const CHECKPOINT_OWNER = "context-compact-cyon";
 const SEARCH_TOOL = "context_search";
 const RUN_TOOL = "context_run";
 const INDEX_TOOL = "context_index";
+
+function settingsFlagOff(path: string): boolean {
+	try {
+		if (!existsSync(path)) return false;
+		const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+		return parsed.contextEngineCommands === "off";
+	} catch {
+		return false;
+	}
+}
+
+export function contextCommandsDisabled(): boolean {
+	const value = process.env.PI_CONTEXT_ENGINE_COMMANDS?.trim().toLowerCase();
+	if (value === "off" || value === "0" || value === "false") return true;
+	// User-level pi settings (~/.pi/agent/settings.json)
+	if (settingsFlagOff(join(homedir(), ".pi", "agent", "settings.json"))) return true;
+	// Project-level pi settings (./.pi/settings.json)
+	if (settingsFlagOff(join(process.cwd(), ".pi", "settings.json"))) return true;
+	return false;
+}
 
 const ContextRunSchema = Type.Object({
 	language: Type.Union([
@@ -554,6 +574,8 @@ export default function contextEngineExtension(pi: ExtensionAPI): void {
 	pi.on("session_compact", (_event, ctx) => {
 		if (hasOwnedCompaction(ctx)) setSearchActive(true);
 	});
+
+	if (contextCommandsDisabled()) return;
 
 	pi.registerCommand("context-engine", {
 		description: "Show Pi-native context-engine status",

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -161,4 +161,96 @@ test("wires redacted continuity, dynamic unified search, and status commands", a
 	assert.match(notifications.at(-1) ?? "", /Pi context engine/);
 	await commands.get("context-purge")?.handler("", ctx);
 	assert.match(notifications.at(-1) ?? "", /Usage/);
+});
+
+test("PI_CONTEXT_ENGINE_COMMANDS=off skips command registration but keeps tools", async (t) => {
+	const previous = process.env.PI_CONTEXT_ENGINE_COMMANDS;
+	process.env.PI_CONTEXT_ENGINE_COMMANDS = "off";
+	t.after(() => {
+		if (previous === undefined) delete process.env.PI_CONTEXT_ENGINE_COMMANDS;
+		else process.env.PI_CONTEXT_ENGINE_COMMANDS = previous;
+	});
+
+	const handlers = new Map<string, Array<(...args: any[]) => unknown>>();
+	const bus = new Map<string, Array<(data: any) => void>>();
+	const tools = new Map<string, ToolDefinition>();
+	const commands = new Map<string, { handler: (...args: any[]) => unknown }>();
+	let activeTools: string[] = [];
+	const events = {
+		on(name: string, handler: (data: any) => void) {
+			const list = bus.get(name) ?? [];
+			list.push(handler);
+			bus.set(name, list);
+			return () => {};
+		},
+		emit(name: string, data: any) {
+			for (const handler of bus.get(name) ?? []) handler(data);
+		},
+	};
+	const pi = {
+		on(name: string, handler: (...args: any[]) => unknown) {
+			const list = handlers.get(name) ?? [];
+			list.push(handler);
+			handlers.set(name, list);
+		},
+		registerTool(tool: ToolDefinition) {
+			tools.set(tool.name, tool);
+			activeTools.push(tool.name);
+		},
+		registerCommand(name: string, command: { handler: (...args: any[]) => unknown }) {
+			commands.set(name, command);
+		},
+		getActiveTools: () => [...activeTools],
+		setActiveTools(names: string[]) {
+			activeTools = [...names];
+		},
+		events,
+		exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+	} as unknown as ExtensionAPI;
+
+	contextEngineExtension(pi);
+	assert.deepEqual([...commands.keys()], []);
+	assert.deepEqual([...tools.keys()], ["context_run", "context_index", "context_search"]);
+});
+
+test("project .pi/settings.json contextEngineCommands=off skips commands but keeps tools", async (t) => {
+	const previousCwd = process.cwd();
+	const dir = await mkdtemp(join(tmpdir(), "ctx-engine-settings-"));
+	t.after(async () => {
+		process.chdir(previousCwd);
+		await rm(dir, { recursive: true, force: true });
+	});
+	await mkdir(join(dir, ".pi"), { recursive: true });
+	await writeFile(join(dir, ".pi", "settings.json"), JSON.stringify({ contextEngineCommands: "off" }));
+	process.chdir(dir);
+
+	const handlers = new Map<string, Array<(...args: any[]) => unknown>>();
+	const bus = new Map<string, Array<(data: any) => void>>();
+	const tools = new Map<string, ToolDefinition>();
+	const commands = new Map<string, { handler: (...args: any[]) => unknown }>();
+	const pi = {
+		on(name: string, handler: (...args: any[]) => unknown) {
+			const list = handlers.get(name) ?? [];
+			list.push(handler);
+			handlers.set(name, list);
+		},
+		registerTool(tool: ToolDefinition) {
+			tools.set(tool.name, tool);
+		},
+		registerCommand(name: string, command: { handler: (...args: any[]) => unknown }) {
+			commands.set(name, command);
+		},
+		getActiveTools: () => [],
+		events: {
+			on() {
+				return () => {};
+			},
+			emit() {},
+		},
+		exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+	} as unknown as ExtensionAPI;
+
+	contextEngineExtension(pi);
+	assert.deepEqual([...commands.keys()], []);
+	assert.deepEqual([...tools.keys()], ["context_run", "context_index", "context_search"]);
 });
