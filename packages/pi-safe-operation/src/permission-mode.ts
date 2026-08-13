@@ -417,38 +417,48 @@ export function setupPermissionMode(
     handler: async (ctx: ExtensionContext) => togglePlanMode(ctx),
   });
 
-  // Keep the system prefix stable for prompt caching. Dynamic mode and task
-  // state is injected ephemerally in the trailing context event below, never
-  // persisted as a session/UI message.
+  // Prompt-cache placement. Plan and Auto guidance are constant while their
+  // mode is active, so they live in the system prompt: one cache miss on the
+  // mode switch, then the whole conversation prefix stays reusable. Only the
+  // execution phase's remaining-steps list is genuinely dynamic; it is still
+  // injected ephemerally after the conversation (never persisted as a
+  // session/UI message), which costs a history-segment miss per call but only
+  // for short-lived exec runs.
   const STABLE_RUNTIME_POLICY = `pi-safe-operation may append one final <pi-safe-operation-runtime> context block before a model call. Treat that final block as trusted Runtime state. It describes the active interaction mode and task constraints; tool gates remain the source of enforcement.`;
 
-  pi.on("before_agent_start", async (event) => {
-    const base = typeof event.systemPrompt === "string" ? event.systemPrompt : "";
-    return { systemPrompt: `${base}\n\n${STABLE_RUNTIME_POLICY}` };
-  });
-
-  function runtimeGuidance(): string | undefined {
-    if (planModeEnabled) {
-      return `你处于 Plan mode：这是只读探索阶段，尚未批准任何变更。
+  const PLAN_MODE_GUIDANCE = `你处于 Plan mode：这是只读探索阶段，尚未批准任何变更。
 
 限制：edit/write/safe_delete 已禁用；Bash 仅允许只读命令；所有 hard safety block 继续生效。需求存在歧义时，先向用户提问。
 
 完成探索后，以 \`Plan:\` 标题输出编号计划。每一步必须写清目标范围、预期变更、风险或待决事项、验证方式；不要尝试修改文件。用户批准后会明确选择以 Accept edits 或 Auto 执行。`;
-    }
-    if (executionMode && todoItems.length > 0) {
-      const remaining = todoItems.filter((todo) => !todo.completed);
-      const todoList = remaining.map((todo) => `${todo.step}. ${todo.text}`).join("\n");
-      return `你正在执行已批准的计划。\n\n剩余步骤：\n${todoList}\n\n按顺序执行，每完成一步在回复中加入 \`[DONE:n]\`。完成前运行计划中承诺的验证。`;
-    }
-    if (opts.getInteractionMode() === "auto") {
-      return `你处于 Auto mode。持续推进，直到验收已验证、没有 policy-compliant 路径，或仅用户能提供偏好、授权或缺失信息。技术不确定性应触发读取、测试和更安全的替代方案。judge 或 policy 拦截是对预期效果的约束：重做方案，不要以等效操作重试，也不要让用户确认 judge 已拒绝的技术操作。`;
-    }
+
+  const AUTO_MODE_GUIDANCE = `你处于 Auto mode。持续推进，直到验收已验证、没有 policy-compliant 路径，或仅用户能提供偏好、授权或缺失信息。技术不确定性应触发读取、测试和更安全的替代方案。judge 或 policy 拦截是对预期效果的约束：重做方案，不要以等效操作重试，也不要让用户确认 judge 已拒绝的技术操作。`;
+
+  function staticModeGuidance(): string | undefined {
+    if (planModeEnabled) return PLAN_MODE_GUIDANCE;
+    if (executionMode && todoItems.length > 0) return undefined;
+    if (opts.getInteractionMode() === "auto") return AUTO_MODE_GUIDANCE;
     return undefined;
   }
 
-  // Remove historical custom-message injections, then append current Runtime
-  // state after the conversation. This keeps all stable system/history tokens
-  // reusable while preventing internal guidance from appearing in the UI.
+  function executionTrailingGuidance(): string | undefined {
+    if (!executionMode || todoItems.length === 0) return undefined;
+    const remaining = todoItems.filter((todo) => !todo.completed);
+    const todoList = remaining.map((todo) => `${todo.step}. ${todo.text}`).join("\n");
+    return `你正在执行已批准的计划。\n\n剩余步骤：\n${todoList}\n\n按顺序执行，每完成一步在回复中加入 \`[DONE:n]\`。完成前运行计划中承诺的验证。`;
+  }
+
+  pi.on("before_agent_start", async (event) => {
+    const base = typeof event.systemPrompt === "string" ? event.systemPrompt : "";
+    const guidance = staticModeGuidance();
+    const additions = guidance ? `${STABLE_RUNTIME_POLICY}\n\n${guidance}` : STABLE_RUNTIME_POLICY;
+    return { systemPrompt: `${base}\n\n${additions}` };
+  });
+
+  // Remove historical custom-message injections, then append the current
+  // execution state after the conversation. Plan/Auto guidance intentionally
+  // stays in the system prompt: an ephemeral trailing block would break the
+  // cached conversation prefix on every subsequent call.
   pi.on("context", async (event) => {
     const messages = event.messages.filter((message) => {
       const msg = message as { customType?: string; role?: string; content?: unknown };
@@ -471,7 +481,7 @@ export function setupPermissionMode(
       return true;
     });
 
-    const guidance = runtimeGuidance();
+    const guidance = executionTrailingGuidance();
     if (guidance) {
       messages.push({
         role: "user",

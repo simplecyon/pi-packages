@@ -1056,8 +1056,11 @@ test("plan approval gate enters the execution phase and tracks progress", async 
 
     const planningInjection = await beforeAgentStart({ type: "before_agent_start", systemPrompt: "base" }, baseContext(tmp, true));
     assert.match(planningInjection?.systemPrompt ?? "", /one final <pi-safe-operation-runtime>/);
+    assert.match(planningInjection?.systemPrompt ?? "", /你处于 Plan mode/);
     const planningContext = await contextHandler({ type: "context", messages: [] }, baseContext(tmp, true));
-    assert.match(JSON.stringify(planningContext?.messages), /你处于 Plan mode/);
+    // Cache guard: constant Plan guidance belongs in the system prompt, never
+    // in an ephemeral trailing block that would break the cached prefix.
+    assert.doesNotMatch(JSON.stringify(planningContext?.messages ?? []), /pi-safe-operation-runtime/);
 
     await approvePlan(extension, tmp);
 
@@ -1071,6 +1074,7 @@ test("plan approval gate enters the execution phase and tracks progress", async 
 
     const executionInjection = await beforeAgentStart({ type: "before_agent_start", systemPrompt: "base" }, baseContext(tmp, true));
     assert.match(executionInjection?.systemPrompt ?? "", /one final <pi-safe-operation-runtime>/);
+    assert.doesNotMatch(executionInjection?.systemPrompt ?? "", /你处于 Plan mode/);
     const executionContext = await contextHandler({ type: "context", messages: [] }, baseContext(tmp, true));
     assert.match(JSON.stringify(executionContext?.messages), /正在执行已批准的计划/);
     assert.equal((execMessage.message as any).display, false);
@@ -1084,6 +1088,32 @@ test("plan approval gate enters the execution phase and tracks progress", async 
     assert.equal(todos[0]?.completed, true);
     assert.equal(todos[1]?.completed, false);
   } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("auto mode guidance lives in the system prompt, not the cached conversation tail", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-auto-cache-"));
+  const restoreHome = withGlobalConfig({ interactionMode: "auto" });
+  try {
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const beforeAgentStart = extension.handlers.get("before_agent_start")?.[0];
+    const contextHandler = extension.handlers.get("context")?.at(-1);
+    assert.ok(beforeAgentStart);
+    assert.ok(contextHandler);
+
+    const injection = await beforeAgentStart({ type: "before_agent_start", systemPrompt: "base" }, baseContext(tmp, true));
+    assert.match(injection?.systemPrompt ?? "", /one final <pi-safe-operation-runtime>/);
+    assert.match(injection?.systemPrompt ?? "", /你处于 Auto mode/);
+
+    // Cache guard: with no exec phase active, the context handler must not
+    // append an ephemeral trailing block; that would break the cached
+    // conversation prefix on every subsequent call.
+    const result = await contextHandler({ type: "context", messages: [] }, baseContext(tmp, true));
+    assert.deepEqual(result?.messages, []);
+  } finally {
+    restoreHome();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
