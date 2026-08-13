@@ -5,7 +5,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import { TOKEN_ROI_MILESTONE_EVENT } from "../../pi-context-core/src/index.ts";
 
-const globalRoot = execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim();
+// On Windows, npm is a .cmd shim that execFileSync cannot spawn without a
+// shell; shell resolution is equivalent on Unix.
+const globalRoot = execFileSync("npm", ["root", "-g"], { encoding: "utf8", shell: true }).trim();
 const loaderUrl = pathToFileURL(
 	join(
 		globalRoot,
@@ -88,6 +90,7 @@ test("extension registers read/write tools, command, and lifecycle handlers", as
 		"agent_settled",
 		"input",
 		"session_shutdown",
+		"context",
 	]);
 });
 
@@ -441,4 +444,157 @@ test("session reconstruction accepts legacy snapshots without trusting malformed
 			theme,
 		),
 	);
+});
+
+function userMessage(text: string) {
+	return { role: "user" as const, content: text, timestamp: 0 };
+}
+
+function assistantMessage() {
+	return {
+		role: "assistant" as const,
+		content: [{ type: "text" as const, text: "working" }],
+		api: "test",
+		provider: "test",
+		model: "test",
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "stop" as const,
+		timestamp: 0,
+	};
+}
+
+function taskToolResultMessage(revision: number | undefined, toolName = "update_tasks") {
+	return {
+		role: "toolResult" as const,
+		toolCallId: `call-${toolName}-${revision ?? "rejected"}`,
+		toolName,
+		content: [{ type: "text" as const, text: "ok" }],
+		details: revision === undefined ? undefined : { revision, tasks: [] },
+		isError: false,
+		timestamp: 0,
+	};
+}
+
+async function fireContext(
+	extension: Awaited<ReturnType<typeof loadSessionTasks>>,
+	messages: unknown[],
+) {
+	const handler = extension.handlers.get("context")?.[0];
+	assert.ok(handler, "context handler should be registered");
+	return handler({ type: "context", messages } as never, context);
+}
+
+async function createUnfinishedList(extension: Awaited<ReturnType<typeof loadSessionTasks>>) {
+	const update = toolDefinition(extension, "update_tasks");
+	await update.execute(
+		"update-drift",
+		{
+			expected_revision: 0,
+			tasks: [
+				{ id: "implement", title: "Implement the drift guard", status: "in_progress" },
+				{ id: "verify", title: "Verify the drift guard", status: "pending" },
+			],
+		},
+		undefined,
+		undefined,
+		context,
+	);
+}
+
+test("re-injects task state when the current revision is not visible in context", async () => {
+	const extension = await loadSessionTasks();
+	await createUnfinishedList(extension);
+
+	const result = await fireContext(extension, [
+		userMessage("do the work"),
+		assistantMessage(),
+		taskToolResultMessage(undefined), // rejected update: no details, does not restore visibility
+		assistantMessage(),
+	]);
+
+	assert.ok(result?.messages, "context handler should return modified messages");
+	assert.equal(result.messages.length, 5);
+	const reminder = result.messages.at(-1);
+	assert.equal(reminder.role, "user");
+	assert.match(reminder.content, /drifted out of the visible context/);
+	assert.match(reminder.content, /Current task revision: 1\./);
+	assert.match(reminder.content, /\[>\] implement: Implement the drift guard/);
+	assert.match(reminder.content, /\[ \] verify: Verify the drift guard/);
+});
+
+test("stays silent while the current revision is visible and turns are few", async () => {
+	const extension = await loadSessionTasks();
+	await createUnfinishedList(extension);
+
+	const result = await fireContext(extension, [
+		userMessage("do the work"),
+		taskToolResultMessage(1),
+		assistantMessage(),
+		assistantMessage(),
+		assistantMessage(),
+	]);
+
+	assert.equal(result, undefined);
+});
+
+test("nudges after 15 assistant turns without a task update", async () => {
+	const extension = await loadSessionTasks();
+	await createUnfinishedList(extension);
+
+	const fourteen = await fireContext(extension, [
+		taskToolResultMessage(1),
+		...Array.from({ length: 14 }, () => assistantMessage()),
+	]);
+	assert.equal(fourteen, undefined);
+
+	const fifteen = await fireContext(extension, [
+		taskToolResultMessage(1),
+		...Array.from({ length: 15 }, () => assistantMessage()),
+	]);
+	assert.ok(fifteen?.messages, "context handler should return a nudge at the threshold");
+	assert.equal(fifteen.messages.length, 17);
+	const nudge = fifteen.messages.at(-1);
+	assert.equal(nudge.role, "user");
+	assert.match(nudge.content, /15 assistant turns have passed without a task update/);
+	assert.match(nudge.content, /Current task revision: 1\./);
+});
+
+test("get_tasks results restore visibility and reset the turn count", async () => {
+	const extension = await loadSessionTasks();
+	await createUnfinishedList(extension);
+
+	const result = await fireContext(extension, [
+		taskToolResultMessage(1),
+		...Array.from({ length: 14 }, () => assistantMessage()),
+		taskToolResultMessage(1, "get_tasks"),
+		...Array.from({ length: 14 }, () => assistantMessage()),
+	]);
+
+	assert.equal(result, undefined);
+});
+
+test("skips reminders when the task list is empty or fully completed", async () => {
+	const extension = await loadSessionTasks();
+	assert.equal(await fireContext(extension, [userMessage("hello")]), undefined);
+
+	const update = toolDefinition(extension, "update_tasks");
+	await update.execute(
+		"update-completed",
+		{
+			expected_revision: 0,
+			tasks: [{ id: "done", title: "Finish everything", status: "completed" }],
+		},
+		undefined,
+		undefined,
+		context,
+	);
+
+	assert.equal(await fireContext(extension, [userMessage("hello"), assistantMessage()]), undefined);
 });

@@ -27,6 +27,12 @@ external project tracker.
 - Each accepted transition to `completed` emits a low-cardinality
   `session_task_completed` Token ROI milestone. Task IDs and titles are not
   included in that event.
+- Drift guard: before each LLM call, when unfinished tasks exist and the
+  current revision is no longer visible in context (for example after
+  compaction), the extension re-injects the current task state. If the state
+  is visible but 15 assistant turns pass without a task update, it injects a
+  one-line reminder. Both are transient context messages and are never
+  persisted to the session.
 
 Use structured tasks for work with several meaningful steps, not as overhead
 for one-step edits.

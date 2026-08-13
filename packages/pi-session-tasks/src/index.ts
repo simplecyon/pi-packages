@@ -36,6 +36,7 @@ const UI_ENTRY_TYPE = "session-tasks-ui";
 const EXCLUSIVE_UI_CHANNEL = "simplecyon:ui-exclusive";
 const TASKS_AVAILABLE_EVENT = "simplecyon:session-tasks:available";
 const TASKS_SYNC_EVENT = "simplecyon:session-tasks:sync";
+const DRIFT_TURN_THRESHOLD = 15;
 
 interface ExclusiveUIEvent {
 	action: "acquire" | "release";
@@ -135,6 +136,57 @@ function buildTaskList(tasks: readonly Task[], revision: number): string {
 			`${task.status === "completed" ? "[x]" : task.status === "in_progress" ? "[>]" : "[ ]"} ${task.id}: ${task.title}`,
 	);
 	return [`Current task revision: ${revision}.`, ...lines].join("\n");
+}
+
+function buildReinjectedState(tasks: readonly Task[], revision: number): string {
+	return (
+		"The session task list drifted out of the visible context. " +
+		"Current task state:\n" +
+		`${buildTaskList(tasks, revision)}\n` +
+		"Call update_tasks with the current revision as steps start and finish."
+	);
+}
+
+function buildTurnReminder(tasks: readonly Task[], revision: number, turns: number): string {
+	return (
+		`${turns} assistant turns have passed without a task update while work is unfinished. ` +
+		"Refresh the task list now:\n" +
+		`${buildTaskList(tasks, revision)}\n` +
+		"Call update_tasks with the current revision to record progress."
+	);
+}
+
+interface TaskToolVisibility {
+	lastIndex: number;
+	revisionVisible: boolean;
+}
+
+function findTaskToolVisibility(
+	messages: readonly unknown[],
+	currentRevision: number,
+): TaskToolVisibility {
+	let lastIndex = -1;
+	let revisionVisible = false;
+	for (let index = 0; index < messages.length; index++) {
+		const message = messages[index] as {
+			role?: string;
+			toolName?: string;
+			details?: { revision?: number };
+		};
+		if (message?.role !== "toolResult") continue;
+		if (message.toolName !== TOOL_NAME && message.toolName !== READ_TOOL_NAME) continue;
+		lastIndex = index;
+		if (message.details?.revision === currentRevision) revisionVisible = true;
+	}
+	return { lastIndex, revisionVisible };
+}
+
+function countAssistantTurnsAfter(messages: readonly unknown[], startIndex: number): number {
+	let count = 0;
+	for (let index = startIndex + 1; index < messages.length; index++) {
+		if ((messages[index] as { role?: string })?.role === "assistant") count++;
+	}
+	return count;
 }
 
 export default function sessionTasksExtension(pi: ExtensionAPI): void {
@@ -436,5 +488,44 @@ export default function sessionTasksExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_shutdown", async (_event, ctx) => {
 		clearUI(ctx);
+	});
+
+	pi.on("context", async (event) => {
+		const snapshot = currentSnapshot;
+		if (!snapshot || snapshot.tasks.length === 0) return;
+		const unfinished = snapshot.tasks.some((task) => task.status !== "completed");
+		if (!unfinished) return;
+
+		const messages = event.messages as readonly unknown[];
+		const { lastIndex, revisionVisible } = findTaskToolVisibility(messages, snapshot.revision);
+
+		if (!revisionVisible) {
+			return {
+				messages: [
+					...event.messages,
+					{
+						role: "user" as const,
+						content: buildReinjectedState(snapshot.tasks, snapshot.revision),
+						timestamp: Date.now(),
+					},
+				],
+			};
+		}
+
+		const turnsSince = countAssistantTurnsAfter(messages, lastIndex);
+		if (turnsSince >= DRIFT_TURN_THRESHOLD) {
+			return {
+				messages: [
+					...event.messages,
+					{
+						role: "user" as const,
+						content: buildTurnReminder(snapshot.tasks, snapshot.revision, turnsSince),
+						timestamp: Date.now(),
+					},
+				],
+			};
+		}
+
+		return;
 	});
 }
