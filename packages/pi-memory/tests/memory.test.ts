@@ -31,7 +31,7 @@ test("discovers project root and nearest scoped memory", () => {
 	}
 });
 
-test("base snapshot includes global, project, and cwd scope once", () => {
+test("base snapshot includes global and project only, never cwd scope", () => {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-memory-base-"));
 	const agent = fs.mkdtempSync(path.join(os.tmpdir(), "pi-memory-agent-"));
 	try {
@@ -45,7 +45,7 @@ test("base snapshot includes global, project, and cwd scope once", () => {
 		const snapshot = loadBaseSnapshot(path.join(root, "A"), agent);
 		assert.deepEqual(
 			snapshot.files.map((file) => file.content),
-			["global", "project", "scope"],
+			["global", "project"],
 		);
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });

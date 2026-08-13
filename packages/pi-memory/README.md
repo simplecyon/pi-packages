@@ -12,13 +12,15 @@ input and bundles the `memory-maintainer` skill.
 
 ### Base snapshot
 
-At the start of an agent turn, the cache-stable base snapshot may contain:
+At the start of an agent turn, the cache-stable base snapshot contains:
 
 - `~/.pi/agent/MEMORY.md`
 - the project-root `MEMORY.md`
-- the nearest `MEMORY.md` for the initial working directory
 
-Each file appears once in the active context epoch.
+Directory-scoped `MEMORY.md` files are deliberately excluded from the base
+snapshot: they are delivered on demand as steering messages through the
+custom-message channel when the agent first reads or mutates a file under
+their scope (see Progressive disclosure below).
 
 When the base snapshot is first injected, the TUI shows a durable,
 context-free event such as `✦ 读取了 2 份记忆`. Repeated agent turns with the

@@ -137,9 +137,10 @@ export function loadBaseSnapshot(
 
 	add(loadMemoryFromDir(agentDir, maxChars));
 	add(loadMemoryFromDir(projectRoot, maxChars));
-	if (path.resolve(cwd) !== projectRoot) {
-		add(findNearestScopeMemory(cwd, projectRoot, maxChars));
-	}
+	// Directory-scoped MEMORY.md files are deliberately excluded from the
+	// cache-stable base snapshot: they are delivered on demand as steering
+	// messages through the custom-message channel when the agent first reads
+	// or mutates a file under their scope.
 
 	const signature = hashText(
 		files.map((file) => `${file.path}\0${file.hash}`).join("\0"),
