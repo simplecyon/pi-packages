@@ -13,6 +13,29 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
 const MAX_PREVIEW_BYTES = 5 * 1024 * 1024;
 const REMOVE_ATTACHMENT_KEY = "alt+backspace";
 
+// Bracketed paste control sequences used to intercept pastes at the input layer.
+const PASTE_START = "\x1b[200~";
+const PASTE_END = "\x1b[201~";
+// Keep Pi's native large-paste collapse: anything above these thresholds is
+// handed back to the base editor so it folds into a `[paste #N …]` marker.
+const LARGE_PASTE_LINES = 10;
+const LARGE_PASTE_CHARS = 1000;
+
+// Markdown link forms we accept when extracting attachment paths:
+//   [filename](<path with spaces/()>)  and  [filename](/plain/path)
+const MARKDOWN_LINK_ANGLED = /^\[[^\]]+\]\(<([^>]+)>\)$/;
+const MARKDOWN_LINK_PLAIN = /^\[[^\]]+\]\(([^)]+)\)$/;
+
+// Slash-token and skill-token patterns merged from @simplecyon/pi-skill-anywhere
+// so the attachment editor also triggers mid-line skill completion and
+// highlights /skill: tokens without fighting over the editor slot.
+const SLASH_TOKEN_RE = /(?:^|\s)(\/\S*)$/;
+const SKILL_TOKEN_RE = /\/skill:[A-Za-z0-9][A-Za-z0-9-]*/g;
+
+interface ThemeWithFg {
+	fg?: (color: string, text: string) => string;
+}
+
 export interface Attachment {
 	path: string;
 	name: string;
@@ -40,8 +63,74 @@ function resolveCandidatePath(value: string, cwd: string): string | undefined {
 	return resolve(cwd, unquoted);
 }
 
+/** Resolve a standalone editor line to a file path, accepting raw paths and `[name](path)` markdown links. */
+function resolveCandidatePathFromLine(line: string, cwd: string): string | undefined {
+	const trimmed = line.trim();
+	const angled = trimmed.match(MARKDOWN_LINK_ANGLED);
+	if (angled) return resolveCandidatePath(angled[1], cwd);
+	const plain = trimmed.match(MARKDOWN_LINK_PLAIN);
+	if (plain) return resolveCandidatePath(plain[1], cwd);
+	return resolveCandidatePath(line, cwd);
+}
+
 function candidatePaths(text: string, cwd: string): string[] {
-	return text.split(/\r?\n/).map((value) => resolveCandidatePath(value, cwd)).filter((value): value is string => Boolean(value));
+	return text.split(/\r?\n/).map((value) => resolveCandidatePathFromLine(value, cwd)).filter((value): value is string => Boolean(value));
+}
+
+/** Wrap a markdown link target in angle brackets when it would break link syntax. */
+function markdownTarget(path: string): string {
+	return /[\s<>()]/.test(path) ? `<${path}>` : path;
+}
+
+function isLargePaste(text: string): boolean {
+	return text.split("\n").length > LARGE_PASTE_LINES || text.length > LARGE_PASTE_CHARS;
+}
+
+/**
+ * Fold standalone file-path lines into `[filename]` tokens, recording the
+ * name → path mapping used to expand them back at the output boundary. The
+ * editor stores the short tokens (compact display), while `getText()` and
+ * `getExpandedText()` expand them into full `[filename](filepath)` links so
+ * Pi still submits the complete path. Non-path lines pass through untouched.
+ */
+export function foldPathLines(text: string, cwd: string, map: Map<string, string[]>): string {
+	return text
+		.split(/\r?\n/)
+		.map((line) => {
+			const filePath = resolveCandidatePath(line, cwd);
+			if (!filePath) return line;
+			try {
+				if (!existsSync(filePath) || !statSync(filePath).isFile()) return line;
+				const name = basename(filePath);
+				if (name.includes("]")) return line;
+				const paths = map.get(name) ?? [];
+				paths.push(filePath);
+				map.set(name, paths);
+				return `[${name}]`;
+			} catch {
+				return line;
+			}
+		})
+		.join("\n");
+}
+
+/** Expand `[filename]` fold tokens back into `[filename](filepath)` links. */
+function expandFoldedText(text: string, map: Map<string, string[]>): string {
+	const occurrences = new Map<string, number>();
+	return text
+		.split(/\r?\n/)
+		.map((line) => {
+			const match = line.match(/^\[([^\]]+)\]$/);
+			if (!match) return line;
+			const name = match[1];
+			const paths = map.get(name);
+			if (!paths || paths.length === 0) return line;
+			const index = occurrences.get(name) ?? 0;
+			occurrences.set(name, index + 1);
+			if (index >= paths.length) return line;
+			return `[${name}](${markdownTarget(paths[index])})`;
+		})
+		.join("\n");
 }
 
 /** Extract readable files pasted as standalone editor lines. */
@@ -65,21 +154,68 @@ export function collectAttachments(text: string, cwd: string): Attachment[] {
 }
 
 /**
- * Keeps Pi's editor semantics unchanged while making pasted file paths visible
- * as removable attachment cards. Pi still submits the original paths as text.
+ * Stores pasted file paths as short `[filename]` fold tokens so the editor
+ * stays compact, renders attachment cards above the editor, and expands the
+ * tokens into full `[filename](filepath)` links at the text boundary so Pi
+ * submits the complete path. Large pastes keep Pi's native `[paste #N …]`
+ * collapse.
  */
+// @ts-expect-error - overrides private insertCharacter; works at runtime via jiti
+// (merged from pi-skill-anywhere)
 export class AttachmentComposer extends CustomEditor {
 	private attachments: Attachment[] = [];
 	private previewCache = new Map<string, { mtimeMs: number; data: string }>();
+	private pendingPasteMode = false;
+	private pendingPasteBuffer = "";
+	private pathByFoldName = new Map<string, string[]>();
+
+	/** Set by the factory on each construction; reads the live app theme for skill highlighting. */
+	getTheme: () => ThemeWithFg | undefined = () => undefined;
 
 	insertTextAtCursor(text: string): void {
-		super.insertTextAtCursor(text);
+		super.insertTextAtCursor(foldPathLines(text, process.cwd(), this.pathByFoldName));
 		this.syncAttachments();
+	}
+
+	getText(): string {
+		return expandFoldedText(super.getText(), this.pathByFoldName);
+	}
+
+	getExpandedText(): string {
+		return expandFoldedText(super.getExpandedText(), this.pathByFoldName);
 	}
 
 	handleInput(data: string): void {
 		if (matchesKey(data, REMOVE_ATTACHMENT_KEY) && this.attachments.length > 0) {
 			this.removeLastAttachment();
+			return;
+		}
+		// Intercept bracketed paste so standalone file paths become compact
+		// `[name]` fold tokens at paste time. Large pastes are replayed verbatim
+		// so Pi's native `[paste #N …]` collapse is kept.
+		if (data.includes(PASTE_START)) {
+			this.pendingPasteMode = true;
+			this.pendingPasteBuffer = "";
+			data = data.replace(PASTE_START, "");
+		}
+		if (this.pendingPasteMode) {
+			this.pendingPasteBuffer += data;
+			const endIndex = this.pendingPasteBuffer.indexOf(PASTE_END);
+			if (endIndex !== -1) {
+				const pasteContent = this.pendingPasteBuffer.substring(0, endIndex);
+				const remaining = this.pendingPasteBuffer.substring(endIndex + PASTE_END.length);
+				this.pendingPasteMode = false;
+				this.pendingPasteBuffer = "";
+				if (pasteContent.length > 0) {
+					if (isLargePaste(pasteContent)) {
+						super.handleInput(`${PASTE_START}${pasteContent}${PASTE_END}`);
+					} else {
+						super.insertTextAtCursor(foldPathLines(pasteContent, process.cwd(), this.pathByFoldName));
+						this.syncAttachments();
+					}
+				}
+				if (remaining.length > 0) this.handleInput(remaining);
+			}
 			return;
 		}
 		super.handleInput(data);
@@ -89,7 +225,41 @@ export class AttachmentComposer extends CustomEditor {
 	render(width: number): string[] {
 		this.syncAttachments();
 		const cards = this.renderCards(width);
-		return [...cards, ...super.render(width)];
+		const lines = super.render(width);
+		// Skill-token highlighting (merged from pi-skill-anywhere). Defensive:
+		// a highlight failure must never break input rendering.
+		try {
+			const theme = this.getTheme();
+			if (theme && typeof theme.fg === "function") {
+				const fg = theme.fg.bind(theme);
+				return [...cards, ...lines.map((line) => line.replace(SKILL_TOKEN_RE, (tok) => fg("accent", tok)))];
+			}
+		} catch {
+			// Fall through to unhighlighted rendering.
+		}
+		return [...cards, ...lines];
+	}
+
+	insertCharacter(char: string, skipUndoCoalescing?: boolean): void {
+		// @ts-expect-error - super.insertCharacter is private; accessible at runtime
+		super.insertCharacter(char, skipUndoCoalescing);
+		// Trigger slash completion for "/" tokens at any position — mid-line
+		// (after whitespace) AND at line start — so skills can be invoked from
+		// anywhere in the input line. Merged from pi-skill-anywhere.
+		try {
+			// @ts-expect-error - autocompleteState is private; accessible at runtime
+			if (this.autocompleteState) return;
+			// @ts-expect-error - state is private; accessible at runtime
+			const line = this.state.lines[this.state.cursorLine] || "";
+			// @ts-expect-error - state is private; accessible at runtime
+			const before = line.slice(0, this.state.cursorCol);
+			if (SLASH_TOKEN_RE.test(before)) {
+				// @ts-expect-error - tryTriggerAutocomplete is private; accessible at runtime
+				this.tryTriggerAutocomplete();
+			}
+		} catch {
+			// Never let trigger logic break input editing.
+		}
 	}
 
 	private syncAttachments(): void {
@@ -99,11 +269,24 @@ export class AttachmentComposer extends CustomEditor {
 	private removeLastAttachment(): void {
 		const attachment = this.attachments.at(-1);
 		if (!attachment) return;
-		const text = this.getExpandedText?.() ?? this.getText();
-		const remainingLines = text
-			.split(/\r?\n/)
-			.filter((line) => resolveCandidatePath(line, process.cwd()) !== attachment.path);
-		this.setText(remainingLines.join("\n"));
+		const lines = super.getText().split(/\r?\n/);
+		// Attachments created from pasted paths live as `[name]` fold tokens;
+		// manually typed raw-path lines stay raw. Remove the matching line for
+		// whichever form this attachment took.
+		const folded = [...this.pathByFoldName.values()].some((paths) => paths.includes(attachment.path));
+		let lastIndex = -1;
+		if (folded) {
+			for (let i = 0; i < lines.length; i++) {
+				if (lines[i].trim() === `[${attachment.name}]`) lastIndex = i;
+			}
+		} else {
+			for (let i = 0; i < lines.length; i++) {
+				if (resolveCandidatePathFromLine(lines[i], process.cwd()) === attachment.path) lastIndex = i;
+			}
+		}
+		if (lastIndex === -1) return;
+		lines.splice(lastIndex, 1);
+		this.setText(lines.join("\n"));
 		this.syncAttachments();
 	}
 

@@ -219,18 +219,19 @@ export default function (pi: ExtensionAPI): void {
 		// Part 1: autocomplete wrapper.
 		ctx.ui.addAutocompleteProvider((base) => new SkillAnywhereProvider(base));
 
-		// Part 3: install the highlighting editor. The factory receives the
-		// editor-scoped theme (EditorTheme, borderColor only); we additionally
-		// hand it a getter for the full app theme. Capture the theme object
-		// reference here (while ctx is active) rather than closing over ctx
-		// itself — ctx.ui is a lazy getter that re-validates on every access,
-		// and the theme singleton stays valid regardless of ctx lifecycle.
-		const fullTheme = ctx.ui.theme as unknown as ThemeWithFg | undefined;
-		ctx.ui.setEditorComponent((tui, theme, kb) => {
-			const editor = new SkillAnywhereEditor(tui, theme, kb);
-			editor.getTheme = () => fullTheme;
-			return editor;
-		});
+		// Part 3: install the highlighting editor only when no other extension
+		// owns the slot. pi-minimal-tui's AttachmentComposer now ships the
+		// slash-completion trigger and /skill: highlighting merged in, so both
+		// extensions coexist: this one keeps the autocomplete provider (Part 1)
+		// and yields the editor slot to the attachment composer.
+		if (!ctx.ui.getEditorComponent()) {
+			const fullTheme = ctx.ui.theme as unknown as ThemeWithFg | undefined;
+			ctx.ui.setEditorComponent((tui, theme, kb) => {
+				const editor = new SkillAnywhereEditor(tui, theme, kb);
+				editor.getTheme = () => fullTheme;
+				return editor;
+			});
+		}
 	});
 
 	// Part 2: on submit, detect a mid-line /skill:name token, store it for

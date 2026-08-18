@@ -4,7 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import minimalTuiExtension from "../src/index.ts";
-import { collectAttachments } from "../src/attachments.ts";
+import { AttachmentComposer, collectAttachments, foldPathLines } from "../src/attachments.ts";
+
+function createComposer(): AttachmentComposer {
+	const tui = { terminal: { rows: 24 } } as any;
+	const theme = { borderColor: (value: string) => value } as any;
+	const keybindings = { matches: () => false } as any;
+	return new AttachmentComposer(tui, theme, keybindings);
+}
+
+const PASTE_START = "\x1b[200~";
+const PASTE_END = "\x1b[201~";
 
 test("collectAttachments recognizes pasted absolute image and file paths", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-minimal-tui-attachments-"));
@@ -24,7 +34,7 @@ test("collectAttachments recognizes pasted absolute image and file paths", async
 	}
 });
 
-test("installs the attachment composer when no other editor owns the slot", () => {
+test("installs the attachment composer unconditionally as the editor", () => {
 	let onSessionStart: ((event: unknown, context: any) => void) | undefined;
 	let factory: unknown;
 	const pi = {
@@ -37,9 +47,12 @@ test("installs the attachment composer when no other editor owns the slot", () =
 		appendEntry() {},
 	};
 	minimalTuiExtension(pi as any);
+	// Even when another extension already owns the slot, the attachment
+	// composer must take over so pasted files fold (skill-anywhere yields).
 	onSessionStart?.({}, {
 		ui: {
-			getEditorComponent: () => undefined,
+			theme: undefined,
+			getEditorComponent: () => () => ({}),
 			setEditorComponent: (next: unknown) => { factory = next; },
 		},
 		sessionManager: { getBranch: () => [] },
@@ -58,4 +71,128 @@ test("collectAttachments resolves quoted relative paths and ignores unavailable 
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}
+});
+
+test("foldPathLines rewrites standalone file-path lines into fold tokens", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-minimal-tui-attachments-"));
+	try {
+		const image = join(cwd, "clipboard.png");
+		const spaced = join(cwd, "my file.txt");
+		await writeFile(image, "png");
+		await writeFile(spaced, "txt");
+
+		const map = new Map<string, string[]>();
+		const folded = foldPathLines(`Explain these:\n${image}\n./my file.txt\n${join(cwd, "missing.pdf")}\ncat ${image}`, cwd, map);
+		assert.equal(folded, `Explain these:\n[clipboard.png]\n[my file.txt]\n${join(cwd, "missing.pdf")}\ncat ${image}`);
+		assert.deepEqual(map.get("clipboard.png"), [image]);
+		assert.deepEqual(map.get("my file.txt"), [spaced]);
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("collectAttachments accepts markdown link lines and ignores non-file links", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-minimal-tui-attachments-"));
+	try {
+		const spaced = join(cwd, "my file.txt");
+		const image = join(cwd, "clipboard.png");
+		await writeFile(spaced, "txt");
+		await writeFile(image, "png");
+		const attachments = collectAttachments(
+			`[clipboard.png](${image})\n[my file.txt](<${spaced}>)\n[website](https://example.com)`,
+			cwd,
+		);
+		assert.deepEqual(attachments, [
+			{ path: join(cwd, "clipboard.png"), name: "clipboard.png", size: 3, mimeType: "image/png" },
+			{ path: spaced, name: "my file.txt", size: 3, mimeType: undefined },
+		]);
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("pasting a file path stores a fold token and expands it in getText", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-minimal-tui-attachments-"));
+	try {
+		const image = join(cwd, "clipboard.png");
+		await writeFile(image, "png");
+		const editor = createComposer();
+		editor.handleInput(`${PASTE_START}${image}${PASTE_END}`);
+		assert.equal(editor.getText(), `[clipboard.png](${image})`);
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("editor renders the fold token instead of the full path", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-minimal-tui-attachments-"));
+	try {
+		const image = join(cwd, "clipboard.png");
+		await writeFile(image, "png");
+		const editor = createComposer();
+		editor.handleInput(`${PASTE_START}${image}${PASTE_END}`);
+		const rendered = editor.render(80).join("\n");
+		assert.match(rendered, /\[clipboard\.png\]/);
+		assert.ok(!rendered.includes(image), "rendered output must not leak the raw path");
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("expanding the folded text is idempotent", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-minimal-tui-attachments-"));
+	try {
+		const image = join(cwd, "clipboard.png");
+		await writeFile(image, "png");
+		const editor = createComposer();
+		editor.handleInput(`${PASTE_START}${image}${PASTE_END}`);
+		const expanded = editor.getText();
+		// Round-trip: setting expanded text back must not double-expand.
+		editor.setText(expanded);
+		assert.equal(editor.getText(), expanded);
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("alt+backspace removes the last pasted attachment line", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-minimal-tui-attachments-"));
+	try {
+		const first = join(cwd, "a.png");
+		const second = join(cwd, "b.pdf");
+		await writeFile(first, "png");
+		await writeFile(second, "pdf");
+		const editor = createComposer();
+		editor.handleInput(`${PASTE_START}${first}\n${second}${PASTE_END}`);
+		assert.equal(editor.getText(), `[a.png](${first})\n[b.pdf](${second})`);
+		editor.handleInput("\x1b\x7f"); // alt+backspace
+		assert.equal(editor.getText(), `[a.png](${first})`);
+		editor.handleInput("\x1b\x7f");
+		assert.equal(editor.getText(), "");
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("pasting mixed content folds path lines and leaves other lines untouched", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-minimal-tui-attachments-"));
+	try {
+		const image = join(cwd, "clipboard.png");
+		await writeFile(image, "png");
+		const editor = createComposer();
+		editor.handleInput(`${PASTE_START}Explain these:\n${image}\nThanks${PASTE_END}`);
+		assert.equal(editor.getText(), `Explain these:\n[clipboard.png](${image})\nThanks`);
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("pasting plain text and large pastes keeps Pi's native behavior", async () => {
+	const plain = createComposer();
+	plain.handleInput(`${PASTE_START}hello world${PASTE_END}`);
+	assert.equal(plain.getText(), "hello world");
+
+	const large = createComposer();
+	large.handleInput(`${PASTE_START}${"x".repeat(1200)}${PASTE_END}`);
+	assert.match(large.getText(), /^\[paste #\d+ \d+ chars\]$/);
 });

@@ -44,12 +44,21 @@ seconds.
   output, including syntax highlighting, images, errors, timing, and complete
   diffs.
 - Pasted file paths are promoted into removable attachment cards above the
-  editor. Clipboard images already written by Pi to a temporary file receive an
-  `IMG` card; compatible terminals render a small preview, while Windows
-  Terminal and other text-only terminals fall back to filename, type, and size.
-  `Alt+Backspace` removes the last attachment and its standalone path line.
-  Pi still submits the original remaining paths as text, so the feature does not
-  alter model context or file-access semantics.
+  editor and folded in the input line to a compact `[filename]` token, so raw
+  long paths stop consuming editor space. On submit the tokens expand back to
+  full `[filename](filepath)` markdown links (paths with spaces or parentheses
+  use `[name](<path>)`), so Pi still receives the complete path. Non-path lines
+  (commands, prose) paste untouched, manually typed paths stay raw, and large
+  pastes keep Pi's native `[paste #N …]` collapse. Clipboard images already
+  written by Pi to a temporary file receive an `IMG` card; compatible
+  terminals render a small preview, while Windows Terminal and other text-only
+  terminals fall back to filename, type, and size. `Alt+Backspace` removes the
+  last attachment and its folded line.
+- When `@simplecyon/pi-skill-anywhere` is loaded in the same Pi runtime, the
+  attachment editor takes over the editor slot (skill-anywhere yields) and
+  keeps both features: mid-line `/skill:` completion and skill-token
+  highlighting are merged into the composer, and skill-anywhere's autocomplete
+  provider still supplies suggestions.
 - `cyon-minimal-dark` gives user messages a subtle cool-gray highlight while
   keeping tool and custom-message surfaces quiet. User-message highlights omit
   Pi's default blank row above the content and replace the full bottom padding

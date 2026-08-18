@@ -211,10 +211,16 @@ export default function minimalTuiExtension(pi: ExtensionAPI): void {
 	announceBashRedactionOwner();
 
 	pi.on("session_start", (_event, context) => {
-		// Don't replace an editor owned by another extension; Pi supports one editor factory.
-		if (!context.ui.getEditorComponent()) {
-			context.ui.setEditorComponent((tui, theme, keybindings) => new AttachmentComposer(tui, theme, keybindings));
-		}
+		// Always install the attachment editor: skill-anywhere's editor now
+		// checks the slot first, and its slash-completion trigger + skill
+		// highlighting are merged into AttachmentComposer, so attachments and
+		// skill UX coexist instead of fighting over the single editor slot.
+		const fullTheme = context.ui.theme as unknown as { fg?: (color: string, text: string) => string } | undefined;
+		context.ui.setEditorComponent((tui, theme, keybindings) => {
+			const composer = new AttachmentComposer(tui, theme, keybindings);
+			composer.getTheme = () => fullTheme;
+			return composer;
+		});
 		autoApprovedToolCalls.clear();
 		autoApprovalInvalidators.clear();
 		grouping.rebuild(context.sessionManager.getBranch());
