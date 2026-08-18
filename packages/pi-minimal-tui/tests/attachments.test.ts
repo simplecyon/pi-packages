@@ -155,6 +155,37 @@ test("expanding the folded text is idempotent", async () => {
 	}
 });
 
+test("submit path expands fold tokens into full paths", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-minimal-tui-attachments-"));
+	try {
+		const image = join(cwd, "clipboard.png");
+		await writeFile(image, "png");
+		const editor = createComposer();
+		editor.handleInput(`${PASTE_START}Explain:\n${image}${PASTE_END}`);
+		let submitted: string | undefined;
+		editor.onSubmit = (text) => { submitted = text; };
+		// Pi's submitValue() reads state.lines directly and only routes through
+		// expandPasteMarkers — the composer must expand there, not via getText.
+		(editor as any).submitValue();
+		assert.equal(submitted, `Explain:\n[clipboard.png](${image})`);
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("getExpandedText expands fold tokens for follow-up and external-editor paths", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-minimal-tui-attachments-"));
+	try {
+		const image = join(cwd, "clipboard.png");
+		await writeFile(image, "png");
+		const editor = createComposer();
+		editor.handleInput(`${PASTE_START}${image}${PASTE_END}`);
+		assert.equal(editor.getExpandedText(), `[clipboard.png](${image})`);
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
 test("alt+backspace removes the last pasted attachment line", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-minimal-tui-attachments-"));
 	try {

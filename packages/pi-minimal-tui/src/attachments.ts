@@ -185,6 +185,14 @@ export class AttachmentComposer extends CustomEditor {
 		return expandFoldedText(super.getExpandedText(), this.pathByFoldName);
 	}
 
+	// Pi's submit path and getExpandedText() both feed state.lines through
+	// expandPasteMarkers and skip getText(), so intercepting it here is the
+	// single chokepoint that guarantees fold tokens are expanded on submit.
+	expandPasteMarkers(text: string): string {
+		// @ts-expect-error - super.expandPasteMarkers is private; accessible at runtime
+		return expandFoldedText(super.expandPasteMarkers(text), this.pathByFoldName);
+	}
+
 	handleInput(data: string): void {
 		if (matchesKey(data, REMOVE_ATTACHMENT_KEY) && this.attachments.length > 0) {
 			this.removeLastAttachment();
