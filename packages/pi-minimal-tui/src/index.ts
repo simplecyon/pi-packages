@@ -10,7 +10,7 @@ import {
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { AttachmentComposer } from "./attachments.ts";
+import { AttachmentComposer, expandPendingAttachmentTokens } from "./attachments.ts";
 import { CompactDiffComponent } from "./diff.ts";
 import { ActionGroupCoordinator } from "./grouping.ts";
 import { formatErrorOutcome } from "./outcome.ts";
@@ -210,6 +210,14 @@ export default function minimalTuiExtension(pi: ExtensionAPI): void {
 	pi.events.on(BASH_REDACTION_OWNER_DISCOVER, announceBashRedactionOwner);
 	announceBashRedactionOwner();
 
+	pi.on("input", (event) => {
+		// This is the last public boundary before Pi persists and sends user
+		// input. It recovers attachment links even if a CustomEditor lifecycle
+		// path emitted only the compact `[filename]` display token.
+		const expanded = expandPendingAttachmentTokens(event.text);
+		if (expanded === event.text) return;
+		return { action: "transform", text: expanded };
+	});
 	pi.on("session_start", (_event, context) => {
 		// Always install the attachment editor: skill-anywhere's editor now
 		// checks the slot first, and its slash-completion trigger + skill

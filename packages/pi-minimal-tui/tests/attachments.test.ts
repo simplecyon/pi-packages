@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import minimalTuiExtension from "../src/index.ts";
-import { AttachmentComposer, collectAttachments, foldPathLines } from "../src/attachments.ts";
+import {
+	AttachmentComposer,
+	collectAttachments,
+	expandPendingAttachmentTokens,
+	foldPathLines,
+	parseWindowsFileDropList,
+} from "../src/attachments.ts";
 
 function createComposer(): AttachmentComposer {
 	const tui = { terminal: { rows: 24 } } as any;
@@ -15,6 +21,15 @@ function createComposer(): AttachmentComposer {
 
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
+
+test("parses Windows FileDropList JSON without accepting malformed clipboard output", () => {
+	assert.deepEqual(parseWindowsFileDropList(`"C:\\\\Users\\\\Cyon\\\\Desktop\\\\one.png"`), ["C:\\Users\\Cyon\\Desktop\\one.png"]);
+	assert.deepEqual(
+		parseWindowsFileDropList(`["C:\\\\Users\\\\Cyon\\\\Desktop\\\\one.png","D:\\\\docs\\\\two.pdf"]`),
+		["C:\\Users\\Cyon\\Desktop\\one.png", "D:\\docs\\two.pdf"],
+	);
+	assert.deepEqual(parseWindowsFileDropList("not-json"), []);
+});
 
 test("collectAttachments recognizes pasted absolute image and file paths", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-minimal-tui-attachments-"));
@@ -168,6 +183,36 @@ test("submit path expands fold tokens into full paths", async () => {
 		// expandPasteMarkers — the composer must expand there, not via getText.
 		(editor as any).submitValue();
 		assert.equal(submitted, `Explain:\n[clipboard.png](${image})`);
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("input-stage recovery expands the latest folded attachment token once", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-minimal-tui-attachments-"));
+	try {
+		const image = join(cwd, "clipboard.png");
+		await writeFile(image, "png");
+		const editor = createComposer();
+		editor.handleInput(`${PASTE_START}${image}${PASTE_END}`);
+		assert.equal(
+			expandPendingAttachmentTokens("[clipboard.png] please review"),
+			`[clipboard.png](${image}) please review`,
+		);
+		assert.equal(expandPendingAttachmentTokens("[clipboard.png]"), "[clipboard.png]");
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("expansion leaves existing Markdown attachment links intact", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-minimal-tui-attachments-"));
+	try {
+		const image = join(cwd, "clipboard.png");
+		await writeFile(image, "png");
+		const editor = createComposer();
+		editor.handleInput(`${PASTE_START}${image}${PASTE_END}`);
+		assert.equal(editor.getText(), `[clipboard.png](${image})`);
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}

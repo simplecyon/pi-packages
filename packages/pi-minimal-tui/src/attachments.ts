@@ -1,4 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { platform } from "node:os";
 import { basename, extname, isAbsolute, resolve } from "node:path";
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import { getCapabilities, Image, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
@@ -43,6 +45,26 @@ export interface Attachment {
 	mimeType?: string;
 }
 
+// Pi's editor lifecycle may recreate a custom editor before its submitted
+// input reaches extensions. Keep only the most recently pasted mapping until
+// the next input event consumes it.
+let pendingSubmissionPaths: Map<string, string[]> | undefined;
+
+function clonePathMap(map: Map<string, string[]>): Map<string, string[]> {
+	return new Map([...map].map(([name, paths]) => [name, [...paths]]));
+}
+
+function rememberAttachmentPaths(map: Map<string, string[]>): void {
+	pendingSubmissionPaths = clonePathMap(map);
+}
+
+/** Expand tokens using the mapping captured by the most recent attachment paste. */
+export function expandPendingAttachmentTokens(text: string): string {
+	const paths = pendingSubmissionPaths;
+	pendingSubmissionPaths = undefined;
+	return paths ? expandFoldedText(text, paths) : text;
+}
+
 function unquotePath(value: string): string {
 	const trimmed = value.trim();
 	if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
@@ -55,6 +77,40 @@ function formatSize(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
 	if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Parse PowerShell's JSON representation of a Windows FileDropList clipboard value. */
+export function parseWindowsFileDropList(value: string): string[] {
+	try {
+		const parsed: unknown = JSON.parse(value);
+		const entries = typeof parsed === "string" ? [parsed] : Array.isArray(parsed) ? parsed : [];
+		return entries
+			.filter((entry): entry is string => typeof entry === "string")
+			.map((entry) => entry.trim())
+			.filter(Boolean);
+	} catch {
+		return [];
+	}
+}
+
+/** Read Explorer's CF_HDROP clipboard format, which terminal text paste cannot expose. */
+function readWindowsFileDropList(): string[] {
+	if (platform() !== "win32") return [];
+	try {
+		const output = execFileSync(
+			"powershell.exe",
+			[
+				"-NoProfile",
+				"-NonInteractive",
+				"-Command",
+				"$files = Get-Clipboard -Format FileDropList; if ($files) { @($files | ForEach-Object { $_.ToString() }) | ConvertTo-Json -Compress }",
+			],
+			{ encoding: "utf8", timeout: 1500, windowsHide: true },
+		);
+		return parseWindowsFileDropList(output);
+	} catch {
+		return [];
+	}
 }
 
 function resolveCandidatePath(value: string, cwd: string): string | undefined {
@@ -117,20 +173,16 @@ export function foldPathLines(text: string, cwd: string, map: Map<string, string
 /** Expand `[filename]` fold tokens back into `[filename](filepath)` links. */
 function expandFoldedText(text: string, map: Map<string, string[]>): string {
 	const occurrences = new Map<string, number>();
-	return text
-		.split(/\r?\n/)
-		.map((line) => {
-			const match = line.match(/^\[([^\]]+)\]$/);
-			if (!match) return line;
-			const name = match[1];
-			const paths = map.get(name);
-			if (!paths || paths.length === 0) return line;
-			const index = occurrences.get(name) ?? 0;
-			occurrences.set(name, index + 1);
-			if (index >= paths.length) return line;
-			return `[${name}](${markdownTarget(paths[index])})`;
-		})
-		.join("\n");
+	// Tokens can be followed by prose (`[file.md] please review`), not only
+	// occupy a line by themselves. Never re-expand an existing Markdown link.
+	return text.replace(/\[([^\]]+)\](?!\()/g, (token, name: string) => {
+		const paths = map.get(name);
+		if (!paths || paths.length === 0) return token;
+		const index = occurrences.get(name) ?? 0;
+		occurrences.set(name, index + 1);
+		if (index >= paths.length) return token;
+		return `[${name}](${markdownTarget(paths[index])})`;
+	});
 }
 
 /** Extract readable files pasted as standalone editor lines. */
@@ -174,6 +226,7 @@ export class AttachmentComposer extends CustomEditor {
 
 	insertTextAtCursor(text: string): void {
 		super.insertTextAtCursor(foldPathLines(text, process.cwd(), this.pathByFoldName));
+		rememberAttachmentPaths(this.pathByFoldName);
 		this.syncAttachments();
 	}
 
@@ -193,9 +246,36 @@ export class AttachmentComposer extends CustomEditor {
 		return expandFoldedText(super.expandPasteMarkers(text), this.pathByFoldName);
 	}
 
+	// Pi's submitValue() is private in its TypeScript declarations. Wrap its
+	// callback as a second, public-runtime-compatible boundary so folded paths
+	// cannot be lost if a Pi version bypasses the overridden paste expansion.
+	// @ts-expect-error - overrides private submitValue; works at runtime via jiti
+	submitValue(): void {
+		const onSubmit = this.onSubmit;
+		if (!onSubmit) {
+			// @ts-expect-error - super.submitValue is private; accessible at runtime
+			super.submitValue();
+			return;
+		}
+		rememberAttachmentPaths(this.pathByFoldName);
+		this.onSubmit = (text) => onSubmit(expandFoldedText(text, this.pathByFoldName));
+		try {
+			// @ts-expect-error - super.submitValue is private; accessible at runtime
+			super.submitValue();
+		} finally {
+			this.onSubmit = onSubmit;
+		}
+	}
+
 	handleInput(data: string): void {
 		if (matchesKey(data, REMOVE_ATTACHMENT_KEY) && this.attachments.length > 0) {
 			this.removeLastAttachment();
+			return;
+		}
+		// Explorer copies files as CF_HDROP, not text. Read that format before
+		// delegating to Pi's image/text clipboard handler on Windows.
+		if (this.keybindings.matches(data, "app.clipboard.pasteImage")) {
+			void this.handleClipboardPaste(data);
 			return;
 		}
 		// Intercept bracketed paste so standalone file paths become compact
@@ -219,6 +299,7 @@ export class AttachmentComposer extends CustomEditor {
 						super.handleInput(`${PASTE_START}${pasteContent}${PASTE_END}`);
 					} else {
 						super.insertTextAtCursor(foldPathLines(pasteContent, process.cwd(), this.pathByFoldName));
+						rememberAttachmentPaths(this.pathByFoldName);
 						this.syncAttachments();
 					}
 				}
@@ -268,6 +349,17 @@ export class AttachmentComposer extends CustomEditor {
 		} catch {
 			// Never let trigger logic break input editing.
 		}
+	}
+
+	private async handleClipboardPaste(key: string): Promise<void> {
+		const paths = readWindowsFileDropList();
+		if (paths.length > 0) {
+			this.insertTextAtCursor(paths.join("\n"));
+			this.tui.requestRender();
+			return;
+		}
+		// Preserve Pi's native clipboard fallback: image first, then text.
+		super.handleInput(key);
 	}
 
 	private syncAttachments(): void {
