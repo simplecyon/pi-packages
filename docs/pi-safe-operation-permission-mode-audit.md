@@ -2,7 +2,7 @@
 
 Date: 2026-08-03
 Scope: `packages/pi-safe-operation` interaction modes (`chat`, `plan`, `accept-edits`, `auto`)
-Revalidated source: `039e558` (`feat(pi-safe-operation): add interaction modes`)
+Revalidated source: `43279c1` (`fix(pi-safe-operation): avoid macOS Enter shortcut collision`)
 
 ## Outcome
 
@@ -11,9 +11,9 @@ The interaction-mode update resolves two original blockers:
 - runtime switching to `plan` now calls `enterPlanning()` immediately, and leaving plan calls `exitPlanning()`;
 - the package test suite isolates its global config and treats unavailable Windows symlink capability as an explicit skip.
 
-`npm run check` now passes: 46 tests pass and 2 symlink-capability tests skip. The remaining work is still material: plan mode can restore files, plan todos overwrite unrelated session tasks, and auto mode now sends every ordinary mutation to the judge by default.
+`npm run check` now passes: 51 tests pass and 2 symlink-capability tests skip. The latest repair set additionally removes an unsupported judge `temperature` parameter, propagates source cancellation to the judge, refreshes live judge configuration, and avoids a macOS shortcut collision. The remaining work is still material: plan mode can restore files, plan todos overwrite unrelated session tasks, and auto mode sends every ordinary mutation to the judge by default.
 
-The Vault-installed Git package remains behind this source checkout (`d1f7ae4` vs `039e558`) and does not contain the interaction-mode implementation. Do not treat the Vault runtime as validating this feature until it is updated after the remaining repair set lands.
+The Vault-installed Git package remains behind this source checkout (`d1f7ae4` vs `43279c1`) and does not contain the interaction-mode implementation. Do not treat the Vault runtime as validating this feature until it is updated after the remaining repair set lands.
 
 ## Compatibility repair — 2026-08-03
 
@@ -30,6 +30,9 @@ Release gate: run the package check, then refresh the Vault Git package and use 
 | Runtime switch to `plan` did not enter planning state | `applyInteractionMode()` calls `planMode.enterPlanning(ctx)`; a dedicated `/mode plan` test verifies write tools are immediately disabled. | Resolved |
 | Tests read the developer's ambient global config | Full `npm run check` now passes under the present global configuration. | Resolved |
 | Windows symlink tests caused the whole check to fail | The two tests explicitly skip when symlink creation is unavailable. | Resolved with capability-based coverage |
+| Judge request ignored source cancellation | `judgeAdjudicate()` combines `ctx.signal` with its deadline; a regression test verifies the source abort blocks the operation and reaches the completion signal. | Resolved |
+| OpenAI Codex rejected the hard-coded `temperature` field | `030c9a7` removes `temperature`; the auto-allow fixture asserts it is absent. | Resolved |
+| Live sessions used stale judge configuration | Runtime config refresh and the model-picker tests cover cross-session judge changes. | Resolved |
 
 ## Repair plan
 
@@ -55,7 +58,6 @@ Release gate: run the package check, then refresh the Vault Git package and use 
 | Finding | Current evidence | Required change | Acceptance evidence |
 | --- | --- | --- | --- |
 | Legacy command is not fully compatible | Config `permissionMode: ask` maps to `accept-edits`, but `/permission-mode ask` now routes to `/mode` validation and rejects `ask`. | Either retain `ask` translation on the legacy command or remove the alias with a migration notice. | `/permission-mode ask`, `plan`, and `auto` all behave as documented during the migration period. |
-| Cancelled work does not cancel the judge request | Judge completion still only receives `AbortSignal.timeout(...)`, not the host operation signal. | Combine host cancellation and timeout; cancellation must be fail closed. | Aborting the source tool call aborts completion and cannot later allow the operation. |
 | Malformed config or persisted plan state can crash startup | `mergeConfig()` still spreads unvalidated arrays; session state is restored through unchecked casts. | Validate/coerce config and persisted shapes, reject bad fields, retain conservative defaults. | Object/null/non-array config and corrupt entries safely start with a warning or block. |
 | Plan approval persists its execution mode globally | Selecting auto/accept-edits calls the global interaction-mode setter. | Make the approval choice execution-scoped, or explicitly disclose persistence and abort execution if persistence fails. | A plan's execution choice does not silently change future sessions. |
 | Plan guidance references `questionnaire` | The planning tool list and injected instruction still use `questionnaire`, while the available structured tool is `AskUserQuestion`. | Use the actual tool name only if available, otherwise omit it. | Plan-mode tool list contains no unavailable tools. |
@@ -73,7 +75,7 @@ Release gate: run the package check, then refresh the Vault Git package and use 
 
 ```text
 npm run check
-46 pass, 0 fail, 2 skipped
+51 pass, 0 fail, 2 skipped
 ```
 
 The two skipped tests require Windows Developer Mode or elevated permissions to create symlinks. They remain necessary coverage in a capability-enabled CI environment.
