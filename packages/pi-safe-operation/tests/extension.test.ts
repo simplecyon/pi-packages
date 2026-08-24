@@ -6,6 +6,7 @@ import test from "node:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import safeOperation, { __setJudgeCompleteForTests, interactionModeShortcut } from "../src/index.ts";
+import { isReadOnlyChatTool } from "../src/permission-mode.ts";
 
 function createSymlinkOrSkip(t: { skip: (message?: string) => void }, target: string, linkPath: string): boolean {
   try {
@@ -895,7 +896,26 @@ test("a trusted project cannot raise interactionMode to auto above the user base
   }
 });
 
-test("chat mode blocks every tool call without attempting a risk adjudication", async () => {
+test("isReadOnlyChatTool is a conservative allowlist that fails closed", () => {
+  // Known read-only tools are allowed.
+  for (const name of ["read", "grep", "find", "ls", "search_vault", "memory_search", "compact_search", "context_search", "artifact_read", "safe_trash_list", "get_tasks", "get_subagent_result", "AskUserQuestion"]) {
+    assert.equal(isReadOnlyChatTool(name, {}), true, `${name} should be read-only in chat mode`);
+  }
+
+  // Mutating and unknown tools fail closed (blocked).
+  for (const name of ["write", "edit", "safe_delete", "safe_restore", "context_index", "context_run", "update_tasks", "Agent", "subagent", "unknown_tool"]) {
+    assert.equal(isReadOnlyChatTool(name, {}), false, `${name} should be blocked in chat mode`);
+  }
+
+  // Bash is allowlisted only for read-only commands.
+  assert.equal(isReadOnlyChatTool("bash", { command: "cat notes.txt" }), true);
+  assert.equal(isReadOnlyChatTool("bash", { command: "ls -la" }), true);
+  assert.equal(isReadOnlyChatTool("bash", { command: "rm -rf notes.txt" }), false);
+  assert.equal(isReadOnlyChatTool("bash", { command: "echo hi > notes.txt" }), false);
+  assert.equal(isReadOnlyChatTool("bash", {}), false);
+});
+
+test("chat mode allows read-only tools and blocks mutations", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-chat-mode-"));
   const restoreHome = withGlobalConfig({ interactionMode: "chat" });
   try {
@@ -903,12 +923,35 @@ test("chat mode blocks every tool call without attempting a risk adjudication", 
     await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
     const toolCall = extension.handlers.get("tool_call")?.[0];
     assert.ok(toolCall);
-    const result = await toolCall(
+
+    // Read-only tools pass through to the hard safety gates (no chat-mode block).
+    const read = await toolCall(
       { type: "tool_call", toolName: "read", toolCallId: "chat-read", input: { path: "notes.txt" } },
       baseContext(tmp, true),
     );
-    assert.equal(result?.block, true);
-    assert.match(result?.reason ?? "", /Chat mode is active/);
+    assert.notEqual(read?.block, true);
+
+    // Mutating tools are blocked without attempting a risk adjudication.
+    const write = await toolCall(
+      { type: "tool_call", toolName: "write", toolCallId: "chat-write", input: { path: "notes.txt", content: "new" } },
+      baseContext(tmp, true),
+    );
+    assert.equal(write?.block, true);
+    assert.match(write?.reason ?? "", /Chat mode is active/);
+
+    // Bash is allowlisted by command: read-only passes, mutation is blocked.
+    const cat = await toolCall(
+      { type: "tool_call", toolName: "bash", toolCallId: "chat-cat", input: { command: "cat notes.txt" } },
+      baseContext(tmp, true),
+    );
+    assert.notEqual(cat?.block, true);
+
+    const rm = await toolCall(
+      { type: "tool_call", toolName: "bash", toolCallId: "chat-rm", input: { command: "rm -rf notes.txt" } },
+      baseContext(tmp, true),
+    );
+    assert.equal(rm?.block, true);
+    assert.match(rm?.reason ?? "", /Chat mode is active/);
   } finally {
     restoreHome();
     fs.rmSync(tmp, { recursive: true, force: true });

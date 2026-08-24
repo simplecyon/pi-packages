@@ -109,7 +109,9 @@ Set the user-level `interactionMode` in `~/.pi/agent/safe-operation.json`, or
 switch it at runtime with `/mode` (the legacy `/permission-mode` remains an
 alias). The default is `accept-edits`, preserving the former default behavior.
 
-- `chat` — conversation only; all tools are blocked.
+- `chat` — conversation plus read-only inspection: `read`, `grep`, `find`,
+  `ls`, the read-only search tools, and read-only Bash commands stay
+  available; mutating tools and non-allowlisted Bash are blocked.
 - `plan` — read-only exploration and a numbered plan. Approval chooses whether
   to execute in `accept-edits` or `auto`.
 - `accept-edits` — ordinary edits run; deterministic flagged operations ask the

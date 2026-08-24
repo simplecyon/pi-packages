@@ -18,7 +18,7 @@ import {
   isToolCallEventType,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { isSafePlanCommand, setupPermissionMode } from "./permission-mode.ts";
+import { isReadOnlyChatTool, isSafePlanCommand, setupPermissionMode } from "./permission-mode.ts";
 import type { InteractionMode } from "./permission-mode.ts";
 import {
   DEFAULT_JUDGE_CONFIG,
@@ -1257,12 +1257,17 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_call", async (event, ctx) => {
     try {
       if (config.interactionMode === "chat" && !planMode.isPlanningPhase()) {
-        blockedTotal += 1;
-        audit("blocked-chat-mode", { tool: event.toolName });
-        return {
-          block: true,
-          reason: "Chat mode is active: no tools or state changes are available. Switch to plan, accept-edits, or auto mode before acting.",
-        };
+        if (!isReadOnlyChatTool(event.toolName, event.input)) {
+          blockedTotal += 1;
+          audit("blocked-chat-mode", { tool: event.toolName });
+          return {
+            block: true,
+            reason:
+              "Chat mode is active: only read-only tools are available. " +
+              "Switch to plan, accept-edits, or auto mode before making changes.",
+          };
+        }
+        // Read-only tools continue through the hard safety gates below.
       }
 
       if (event.toolName === "read" && isToolCallEventType("read", event)) {

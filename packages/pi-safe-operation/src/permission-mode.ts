@@ -129,6 +129,35 @@ export function isSafePlanCommand(command: string): boolean {
   return !isDestructive && isSafe;
 }
 
+// Read-only tools permitted while chat mode is active. Chat mode blocks every
+// mutating tool and every non-allowlisted Bash command, but keeps file reads,
+// search, and project-state inspection available so the agent can answer
+// questions without changing anything. Unknown tools fail closed.
+const CHAT_READ_ONLY_TOOLS = new Set<string>([
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "search_vault",
+  "memory_search",
+  "compact_search",
+  "context_search",
+  "artifact_read",
+  "safe_trash_list",
+  "get_tasks",
+  "get_subagent_result",
+  "AskUserQuestion",
+]);
+
+/** True when a tool may run during chat mode: a read-only tool or read-only Bash. */
+export function isReadOnlyChatTool(toolName: string, input: unknown): boolean {
+  if (toolName === "bash") {
+    const command = (input as { command?: unknown } | undefined)?.command;
+    return typeof command === "string" && isSafePlanCommand(command);
+  }
+  return CHAT_READ_ONLY_TOOLS.has(toolName);
+}
+
 export interface TodoItem {
   step: number;
   text: string;
