@@ -16,6 +16,7 @@ const aggregateManifest = JSON.parse(
 const workspaces = [
 	["pi-ask-user-question", 1, 0, 0],
 	["pi-context-artifacts", 1, 0, 0],
+	["pi-cache-trace", 1, 0, 0],
 	["pi-context-compact", 1, 0, 0],
 	["pi-context-engine", 1, 0, 0],
 	["pi-context-inspector", 1, 0, 0],

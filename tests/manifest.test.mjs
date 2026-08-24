@@ -13,6 +13,7 @@ const expectedPackages = new Map([
 	["pi-context-compact", "@simplecyon/pi-context-compact"],
 	["pi-context-engine", "@simplecyon/pi-context-engine"],
 	["pi-context-artifacts", "@simplecyon/pi-context-artifacts"],
+	["pi-cache-trace", "@simplecyon/pi-cache-trace"],
 	["pi-context-core", "@simplecyon/pi-context-core"],
 	["pi-context-inspector", "@simplecyon/pi-context-inspector"],
 	["pi-memory", "@simplecyon/pi-memory"],
