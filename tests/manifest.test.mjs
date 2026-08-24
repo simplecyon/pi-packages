@@ -31,7 +31,7 @@ test("aggregate manifest points to existing package resources", () => {
 		...(manifest.pi?.skills ?? []),
 		...(manifest.pi?.themes ?? []),
 	];
-	assert.equal(resources.length, expectedPackages.size + 1);
+	assert.equal(resources.length, expectedPackages.size + 2);
 	for (const resource of resources) {
 		assert.equal(
 			fs.existsSync(path.resolve(root, resource)),
