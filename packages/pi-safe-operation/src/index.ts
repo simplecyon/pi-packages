@@ -1054,7 +1054,8 @@ export default function (pi: ExtensionAPI) {
     }
     const startedAt = Date.now();
     try {
-      const ok = await ctx.ui.confirm(title, message);
+      if (ctx.signal?.aborted) return false;
+      const ok = await ctx.ui.confirm(title, message, ctx.signal ? { signal: ctx.signal } : undefined);
       if (ok) {
         approvedTotal += 1;
         audit("approved", auditData);
@@ -1708,7 +1709,7 @@ export default function (pi: ExtensionAPI) {
       "safe_delete authorization is target-scoped: include only paths explicitly named by the user or unambiguously inside the requested class.",
       "Never add opportunistic cleanup targets to safe_delete; use a separate proposed action for unrelated targets.",
     ],
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const cwd = fs.existsSync(ctx.cwd) ? fs.realpathSync.native(ctx.cwd) : path.resolve(ctx.cwd);
       if (!config.recoverableDelete) {
         blockedTotal += 1;
@@ -1777,6 +1778,21 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
+      onUpdate?.({
+        content: [{
+          type: "text" as const,
+          text: `⏳ 等待确认：即将把 ${targets.length} 个目标移入可恢复回收站。确认框已出现在输入区，中断即可取消。`,
+        }],
+        details: {},
+      });
+      if (signal?.aborted) {
+        blockedTotal += 1;
+        audit("safe-delete-declined", { targets: targets.map((target) => target.relative), reason: "aborted-before-approval" });
+        return {
+          content: [{ type: "text" as const, text: "safe_delete was cancelled before approval." }],
+          details: { moved: [] },
+        };
+      }
       const approved = await ctx.ui.confirm(
         "确认移动到可恢复回收站",
         approvalMessage({
@@ -1789,6 +1805,7 @@ export default function (pi: ExtensionAPI) {
           impact: readableTargetLines(targets),
           saferChoice: "这是比永久删除更安全的方式；确认清单无误后可继续，之后可用 safe_restore 恢复。",
         }),
+        signal ? { signal } : undefined,
       );
       if (!approved) {
         blockedTotal += 1;
@@ -1967,7 +1984,7 @@ export default function (pi: ExtensionAPI) {
       "Never overwrite an existing destination during restore.",
       "Restore only paths explicitly requested by the user; omit paths only when the user asked to restore the whole deletion transaction.",
     ],
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const cwd = fs.existsSync(ctx.cwd) ? fs.realpathSync.native(ctx.cwd) : path.resolve(ctx.cwd);
       const trashBase = path.join(cwd, ".trash", "pi-safe-operation");
       const manifestPath = path.resolve(cwd, params.manifest);
@@ -2078,6 +2095,21 @@ export default function (pi: ExtensionAPI) {
       if (!ctx.hasUI) {
         return fail("interactive approval is required");
       }
+      onUpdate?.({
+        content: [{
+          type: "text" as const,
+          text: `⏳ 等待确认：即将恢复 ${restorations.length} 个目标。确认框已出现在输入区，中断即可取消。`,
+        }],
+        details: {},
+      });
+      if (signal?.aborted) {
+        blockedTotal += 1;
+        audit("safe-restore-declined", { manifest: params.manifest, reason: "aborted-before-approval" });
+        return {
+          content: [{ type: "text" as const, text: "safe_restore was cancelled before approval." }],
+          details: { restored: [] },
+        };
+      }
       const approved = await ctx.ui.confirm(
         "确认恢复回收站内容",
         approvalMessage({
@@ -2090,6 +2122,7 @@ export default function (pi: ExtensionAPI) {
           impact: restorations.map((item) => `${item.trashed} → ${item.original}`),
           saferChoice: "目标路径已检查为不存在；仍不确定时先取消并查看 manifest 与当前工作区状态。",
         }),
+        signal ? { signal } : undefined,
       );
       if (!approved) {
         blockedTotal += 1;
