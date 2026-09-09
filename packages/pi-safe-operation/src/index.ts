@@ -1219,7 +1219,7 @@ export default function (pi: ExtensionAPI) {
           const extensionStatuses = [...footerData.getExtensionStatuses().entries()]
             .filter(([key]: [string, string]) => key !== "interaction-mode")
             .sort(([a]: [string, string], [b]: [string, string]) => a.localeCompare(b))
-            .map(([, text]: [string, string]) => text.replace(/[\\r\\n\\t]/g, " ").replace(/ +/g, " ").trim());
+            .map(([, text]: [string, string]) => text.replace(/[\r\n\t]/g, " ").replace(/ +/g, " ").trim());
           return extensionStatuses.length > 0
             ? [firstLine, secondLine, truncateToWidth(extensionStatuses.join(" "), width, theme.fg("dim", "..."))]
             : [firstLine, secondLine];
