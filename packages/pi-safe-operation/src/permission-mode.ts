@@ -461,7 +461,7 @@ export function setupPermissionMode(
 
 完成探索后，以 \`Plan:\` 标题输出编号计划。每一步必须写清目标范围、预期变更、风险或待决事项、验证方式；不要尝试修改文件。用户批准后会明确选择以 Accept edits 或 Auto 执行。`;
 
-  const AUTO_MODE_GUIDANCE = `你处于 Auto mode。持续推进，直到验收已验证、没有 policy-compliant 路径，或仅用户能提供偏好、授权或缺失信息。技术不确定性应触发读取、测试和更安全的替代方案。judge 或 policy 拦截是对预期效果的约束：重做方案，不要以等效操作重试，也不要让用户确认 judge 已拒绝的技术操作。`;
+  const AUTO_MODE_GUIDANCE = `你处于 Auto mode。持续推进，直到验收已验证、没有 policy-compliant 路径，或仅用户能提供偏好、授权或缺失信息。技术不确定性应触发读取、测试和更安全的替代方案。judge 的 need_evidence 应先补齐事实再审，revise 应实质缩小风险，needs_user 仅询问缺失授权或信息；unavailable 是裁判服务或协议故障，保持操作未执行，修复服务后可重审，不要改写任务或换工具绕过审批。安全拒绝或 policy 拦截是对预期效果的约束：重做方案，不要以等效操作重试，也不要让用户确认 judge 已拒绝的技术操作。`;
 
   function staticModeGuidance(): string | undefined {
     if (planModeEnabled) return PLAN_MODE_GUIDANCE;

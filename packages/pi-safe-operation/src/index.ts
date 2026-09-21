@@ -27,6 +27,7 @@ import {
   NON_CIRCUMVENTION_GUIDELINE,
   normalizeJudgeConfig,
 } from "./judge.ts";
+import { prepareJudgeEvidence, JudgeBlockCache } from "./judge-evidence.ts";
 import type { JudgeConfig } from "./judge.ts";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
@@ -827,6 +828,7 @@ export default function (pi: ExtensionAPI) {
   let approvedTotal = 0;
   let autoApprovedTotal = 0;
   let judgeAnnounced = false;
+  const judgeBlocks = new JudgeBlockCache();
   let externalBashRedactionOwner = false;
   let standaloneBashRegistered = false;
 
@@ -1086,15 +1088,44 @@ export default function (pi: ExtensionAPI) {
       return declineReason;
     }
     if (config.interactionMode === "auto") {
-      return judgeAdjudicate({
+      const request = judgeRequestFromEvent(event, auditData, (text) => redactText(text).text);
+      const evidence = prepareJudgeEvidence({
+        event, request, ctx,
+        explicitTargets: Array.isArray(auditData.targets) ? auditData.targets.map(String) : [],
+        protectedPaths: config.protectedPaths,
+        knowledgeDirs: config.knowledgeDirs,
+        redact: (text) => redactText(text).text,
+        resolveTarget: (target) => resolveRealTarget(target, ctx.cwd),
+        mayRead: (target) => {
+          const relative = normalizeRelative(path.relative(ctx.cwd, path.resolve(ctx.cwd, target)));
+          return !privateKeyPath(target) && !matchesPathPattern(relative, [...config.sensitivePaths, ...config.protectedPaths]);
+        },
+        gitStatus: async (target) => {
+          const absolute = path.resolve(ctx.cwd, target);
+          if (!isInside(ctx.cwd, absolute)) return "outside project; recovery unknown";
+          const result = await pi.exec("git", ["--literal-pathspecs", "status", "--porcelain", "--untracked-files=normal", "--", path.relative(ctx.cwd, absolute)], { cwd: ctx.cwd, timeout: 3000 });
+          return result.code === 0 ? result.stdout || "clean or ignored; recoverability not established" : "Git status unavailable";
+        },
+      });
+      await evidence.collect(["git_status"]);
+      const cacheKey = crypto.createHash("sha256").update(evidence.fingerprint + JSON.stringify(request.evidence?.git_status) + JSON.stringify(config.judge)).digest("hex");
+      const previous = judgeBlocks.get(cacheKey);
+      if (previous) {
+        blockedTotal += 1;
+        audit("judge-repeat-block", { tool: event.toolName });
+        return previous + "\n相同操作和已观测事实未变化，未重复调用裁判。";
+      }
+      const result = await judgeAdjudicate({
         ctx,
         judgeConfig: config.judge,
-        request: judgeRequestFromEvent(event, auditData, (text) => redactText(text).text),
+        request,
         title,
         message,
         declineReason,
         auditData,
         deps: {
+          collectEvidence: evidence.collect,
+          isFresh: evidence.isFresh,
           complete: (model, context, options) =>
             (judgeCompleteOverride ?? defaultJudgeComplete)(model, context, options),
           redact: (text) => redactText(text).text,
@@ -1120,6 +1151,8 @@ export default function (pi: ExtensionAPI) {
           },
         },
       });
+      if (typeof result === "string") judgeBlocks.set(cacheKey, result);
+      return result;
     }
     return (await interactiveConfirm(ctx, title, message, auditData, runtime)) ? true : declineReason;
   }
@@ -1248,6 +1281,7 @@ export default function (pi: ExtensionAPI) {
     autoApprovedTotal = 0;
     config = loadConfig(root, ctx.isProjectTrusted());
     judgeAnnounced = false;
+    judgeBlocks.clear();
     permissionFooterInstalled = false;
     installPermissionFooter(ctx);
     updateInteractionModeStatus(ctx);
@@ -1315,6 +1349,11 @@ export default function (pi: ExtensionAPI) {
         const knowledgeDir = underNamedDir(relative, config.knowledgeDirs);
         const reasons: string[] = [];
         if (config.mode === "strict") reasons.push("strict mode requires approval for write/edit");
+        if (protectedPattern && config.interactionMode === "auto") {
+          blockedTotal += 1;
+          audit("blocked-auto-protected-path", { tool: event.toolName, pattern: protectedPattern });
+          return { block: true, reason: `Auto mode cannot modify protected path: ${protectedPattern}. ${NON_CIRCUMVENTION_GUIDELINE}` };
+        }
         if (protectedPattern) reasons.push(`protected path: ${protectedPattern}`);
         if (knowledgeDir && isCodeFile(absolute)) reasons.push(`code output inside vault knowledge directory: ${knowledgeDir}/`);
 
@@ -1505,6 +1544,11 @@ export default function (pi: ExtensionAPI) {
         if (config.mode === "strict") reasons.push("strict mode requires approval for mutating Bash");
         const protectedPattern = mentionedProtectedPath(command, config);
         const knowledgeDir = mentionedCodeInKnowledgeDir(command, config);
+        if (protectedPattern && config.interactionMode === "auto") {
+          blockedTotal += 1;
+          audit("blocked-auto-protected-path", { tool: "bash", pattern: protectedPattern });
+          return { block: true, reason: `Auto mode cannot mutate a protected path: ${protectedPattern}. ${NON_CIRCUMVENTION_GUIDELINE}` };
+        }
         if (protectedPattern) reasons.push(`mutation references protected path: ${protectedPattern}`);
         if (knowledgeDir) reasons.push(`code mutation references vault knowledge directory: ${knowledgeDir}/`);
       }

@@ -120,6 +120,10 @@ alias). The default is `accept-edits`, preserving the former default behavior.
   operations from redacted facts: `allow` executes; `adjust` or `escalate`
   blocks the current operation and returns actionable constraints to the main
   Agent, which must re-plan rather than turn technical risk into a user popup.
+  `need_evidence` requests fixed read-only probes (`file_state`, `git_status`,
+  `current_content`), with at most two evidence rounds under one judge deadline.
+  Repeated requests with no new facts stop immediately. `deny` is a policy rejection;
+  `unavailable` is a service or response-protocol failure, not a safety verdict.
 
 ```json
 {
@@ -142,6 +146,34 @@ defaults to `true`, so ordinary mutations are also reviewed; deterministic
 hard blocks never reach the model. Legacy `permissionMode: "ask" | "plan" |
 "auto"` is read for compatibility (`ask` maps to `accept-edits`) but is no
 longer written.
+
+## Auto review evidence and recovery
+
+The judge receives redacted policy context, explicit target metadata, the proposed
+change, and up to three recent user-message excerpts from the active session branch.
+Excerpts are incomplete source evidence, not new authorization. Missing context
+must not be interpreted as approval. Paths, reasons and target lists are redacted
+along with content. Evidence probes cannot run model-supplied commands or read
+model-selected paths. Existing content is read only on request, from non-sensitive,
+non-protected regular files, with a total 16 KB read budget per review. Binary files
+and symlink leaves are not read. Truncation and unavailable facts remain explicit.
+Git status is an observation, not proof of recoverability.
+
+Only `allow` with `none` or `low` risk can execute. Missing/invalid fields,
+contradictory verdicts and unsupported probe names fail closed as `unavailable`.
+Auto mode blocks recognized protected-path mutations before calling the judge;
+`accept-edits` retains its interactive behavior. Explicit target metadata is checked
+again after approval; a changed target requires fresh review. This narrows the race
+window but is not an atomic filesystem transaction or coverage of arbitrary Bash
+side effects.
+
+Session-local blocked-review fingerprints suppress identical submissions while
+observed target state, operation, user-message excerpts, policy and judge settings
+are unchanged. Approvals and service failures are never cached. This is duplicate
+suppression, not a semantic equivalent-action detector. The non-circumvention rule
+still applies to safety refusals. After a service failure, restore the service and
+resubmit for review; do not change tools to bypass it. Existing `onFailure` values
+remain readable for compatibility; neither opens a technical approval popup.
 
 ## Security boundary
 

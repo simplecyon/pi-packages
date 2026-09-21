@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import safeOperation, { __setJudgeCompleteForTests, interactionModeShortcut } from "../src/index.ts";
 import { isReadOnlyChatTool } from "../src/permission-mode.ts";
+
+// Keep host credentials and permission settings out of regression fixtures.
+const restoreSuiteHome = withGlobalConfig({});
+after(restoreSuiteHome);
 
 function createSymlinkOrSkip(t: { skip: (message?: string) => void }, target: string, linkPath: string): boolean {
   try {
@@ -1333,6 +1337,84 @@ async function flaggedOverwrite(extension: any, ctx: any) {
   );
 }
 
+test("auto evidence flow reads the target and invalidates an in-flight approval", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-evidence-flow-"));
+  const restoreHome = withGlobalConfig({ permissionMode: "auto", judge: { provider: "test-provider", model: "j1" } });
+  let round = 0;
+  const calls = installFakeJudge(async (call) => {
+    round++;
+    const payload = call.context.messages[0].content[0].text;
+    assert.match(payload, /file_state/);
+    assert.match(payload, /git_status/);
+    assert.match(payload, /Update only notes.txt/);
+    if (round === 1) return judgeVerdictResponse({ verdict: "need_evidence", riskLevel: "medium", rationale: "need original", evidenceNeeded: ["current_content"] });
+    assert.match(payload, /original notes/);
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "concurrent change");
+    return judgeVerdictResponse({ verdict: "allow", riskLevel: "low", rationale: "ok" });
+  });
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "original notes");
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const ctx = { ...autoTestContext(tmp, fakeJudgeRegistry().registry, []), sessionManager: {
+      getBranch: () => [{ type: "message", id: "user1", message: { role: "user", content: "Update only notes.txt" } }],
+    } };
+    const result = await flaggedOverwrite(extension, ctx);
+    assert.equal(result.block, true);
+    assert.match(result.reason, /状态已变化/);
+    assert.equal(calls.length, 2);
+  } finally { __setJudgeCompleteForTests(null); restoreHome(); fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test("auto suppresses duplicate blocks but reviews changed state and never caches outages", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-review-repeat-"));
+  const restoreHome = withGlobalConfig({ permissionMode: "auto", judge: { provider: "test-provider", model: "j1" } });
+  let unavailable = false;
+  const calls = installFakeJudge(async () => {
+    if (unavailable) throw new Error("offline");
+    return judgeVerdictResponse({ verdict: "adjust", riskLevel: "medium", rationale: "preserve old text", adjustment: "inspect original" });
+  });
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const ctx = autoTestContext(tmp, fakeJudgeRegistry().registry, []);
+    await flaggedOverwrite(extension, ctx);
+    const repeated = await flaggedOverwrite(extension, ctx);
+    assert.match(repeated.reason, /未重复调用/);
+    assert.equal(calls.length, 1);
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "changed evidence");
+    unavailable = true;
+    for (let i = 0; i < 2; i++) {
+      const result = await flaggedOverwrite(extension, ctx);
+      assert.match(result.reason, /auto-judge:unavailable/);
+    }
+    assert.equal(calls.length, 3);
+  } finally { __setJudgeCompleteForTests(null); restoreHome(); fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test("auto protected writes and recognized protected Bash mutations never reach the judge", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-protected-auto-"));
+  const restoreHome = withGlobalConfig({ permissionMode: "auto", judge: { provider: "test-provider", model: "j1" } });
+  const calls = installFakeJudge(async () => judgeVerdictResponse({ verdict: "allow", riskLevel: "low", rationale: "must not run" }));
+  try {
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const handler = extension.handlers.get("tool_call")![0];
+    const ctx = autoTestContext(tmp, fakeJudgeRegistry().registry, []);
+    for (const event of [
+      { toolName: "write", input: { path: ".pi/safe-operation.json", content: "{}" } },
+      { toolName: "write", input: { path: ".git/config", content: "" } },
+      { toolName: "bash", input: { command: "echo changed > .pi/safe-operation.json" } },
+    ]) {
+      const result = await handler({ type: "tool_call", toolCallId: "protected", ...event }, ctx);
+      assert.equal(result?.block, true);
+      assert.match(result.reason, /protected path/);
+    }
+    assert.equal(calls.length, 0);
+  } finally { __setJudgeCompleteForTests(null); restoreHome(); fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
 test("auto mode allows a flagged write when the judge allows", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-judge-allow-"));
   const restoreHome = withGlobalConfig({
@@ -1823,7 +1905,7 @@ test("a live session refreshes the globally selected judge before cycling into a
     const judgeCommand = sessionA.commands.get("judge-model") as { handler: (args: unknown, ctx: any) => Promise<void> };
     await judgeCommand.handler("test-provider/j2", notifyCapturingContext(tmp, [], registry));
 
-    const shortcut = sessionB.shortcuts.get("alt+m") as { handler: (ctx: any) => Promise<void> };
+    const shortcut = sessionB.shortcuts.get(interactionModeShortcut()) as { handler: (ctx: any) => Promise<void> };
     await shortcut.handler(notifyCapturingContext(tmp, [], registry));
     const result = await flaggedOverwrite(sessionB, autoTestContext(tmp, registry, []));
     assert.equal(result, undefined);
@@ -1903,7 +1985,7 @@ test("interaction-mode shortcut avoids the Enter collision on macOS", () => {
   assert.equal(interactionModeShortcut("linux"), "alt+m");
 });
 
-test("alt+m cycles chat → plan → accept-edits → auto with persistence", async () => {
+test("platform shortcut cycles chat → plan → accept-edits → auto with persistence", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-operation-shortcut-cycle-"));
   const restoreHome = withGlobalConfig({ judge: { provider: "test-provider", model: "j1" } });
   const calls = installFakeJudge(async () =>
@@ -1912,7 +1994,7 @@ test("alt+m cycles chat → plan → accept-edits → auto with persistence", as
     fs.writeFileSync(path.join(tmp, "notes.txt"), "old");
     const extension = await loadSafeOperation(tmp);
     await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
-    const shortcut = extension.shortcuts.get("alt+m") as { handler: (ctx: any) => Promise<void> };
+    const shortcut = extension.shortcuts.get(interactionModeShortcut()) as { handler: (ctx: any) => Promise<void> };
     assert.ok(shortcut);
     const { registry } = fakeJudgeRegistry();
     const notices: Array<{ message: string; level: string }> = [];
