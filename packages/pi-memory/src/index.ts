@@ -42,6 +42,8 @@ const CUSTOM_TYPE = "cyon-scope-memory";
 const RECALL_CUSTOM_TYPE = "cyon-discrete-memory";
 const MEMORY_READ_ENTRY = "memory-read-event";
 const RECALL_READ_ENTRY = "memory-recall-event";
+/** 尾部注入块的防伪标记：用于在 context 事件中识别并剥离历史注入（防御性） */
+const RECALL_TAIL_MARKER = "<!-- pi-memory:ephemeral-recall -->";
 const BASE_EVENT = "memory-injection:base-loaded";
 const CAPABILITY_AVAILABLE = "cyon:memory:available";
 const CAPABILITY_DISCOVER = "cyon:memory:discover";
@@ -697,12 +699,62 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 		if (activeRecall) {
 			lastRecall = activeRecall;
 			announceRecall(activeRecall);
-			additions.push(activeRecall.content);
+			// recall 内容不进 system prompt，改由 context 事件尾部注入（见 pi.on("context")）
 		}
 		if (additions.length === 0) return;
 		return {
 			systemPrompt: `${event.systemPrompt}\n\n${additions.join("\n\n")}\n`,
 		};
+	});
+
+	// Prompt-cache placement: the recall block resets on every user input and
+	// only re-attaches when the new query hits the discrete-memory index, so
+	// it must not live in the system prompt — appearing or disappearing there
+	// invalidates the cached conversation prefix from position zero. It is
+	// injected ephemerally after the conversation instead: the block is never
+	// persisted as a session/UI message, and each model call only re-processes
+	// this tail segment. (Placement pattern mirrors pi-safe-operation's
+	// permission-mode execution guidance.)
+	pi.on("context", async (event) => {
+		if (!enabled) return;
+		const isInjectedRecall = (message: unknown): boolean => {
+			const msg = message as { role?: string; content?: unknown };
+			if (msg.role !== "user") return false;
+			const content = msg.content;
+			if (typeof content === "string") {
+				return content.includes(RECALL_TAIL_MARKER);
+			}
+			if (Array.isArray(content)) {
+				return content.some(
+					(block) =>
+						(block as { type?: string; text?: unknown })?.type === "text" &&
+						typeof (block as { text?: unknown }).text === "string" &&
+						(block as { text: string }).text.includes(RECALL_TAIL_MARKER),
+			);
+			}
+			return false;
+		};
+		const original = event.messages;
+		let messages = original.some(isInjectedRecall)
+			? original.filter((message) => !isInjectedRecall(message))
+			: original;
+		if (!activeRecall) {
+			return messages === original ? undefined : { messages };
+		}
+		if (messages === original) {
+			messages = [...original];
+		}
+		messages.push({
+			role: "user",
+			content: [
+				{
+					type: "text",
+					text: `${RECALL_TAIL_MARKER}\n${activeRecall.content}`,
+				},
+			],
+			timestamp: Date.now(),
+		});
+		return { messages };
 	});
 
 	pi.on(

@@ -457,8 +457,9 @@ test("recalls indexed discrete memory from user input with routing, tools, and d
 			},
 			ctx,
 		)) as { systemPrompt: string };
-		assert.match(before.systemPrompt, /<memory_recall/);
-		assert.match(before.systemPrompt, /Pi Memory Runtime/);
+		// recall 不再进 system prompt（改走对话尾部）；project_memory 仍在
+		assert.doesNotMatch(before.systemPrompt, /<memory_recall/);
+		assert.match(before.systemPrompt, /<project_memory/);
 		assert.equal(
 			harness.entries.filter(
 				(entry) => entry.customType === "memory-recall-event",
@@ -486,6 +487,40 @@ test("recalls indexed discrete memory from user input with routing, tools, and d
 			1,
 		);
 
+		// recall 由 context 事件尾部注入：对话前缀不动，仅追加尾块
+		const baseMessages = [
+			{ role: "user", content: [{ type: "text", text: "给 pi memory 增加关键词召回" }] },
+			{ role: "assistant", content: [{ type: "text", text: "好的" }] },
+		] as unknown[];
+		const contextOnce = (await fire(
+			harness.handlers,
+			"context",
+			{ type: "context", messages: baseMessages },
+			ctx,
+		)) as { messages: unknown[] };
+		assert.equal(contextOnce.messages.length, baseMessages.length + 1);
+		const tail = contextOnce.messages.at(-1) as {
+			role: string;
+			content: Array<{ type: string; text: string }>;
+		};
+		assert.equal(tail.role, "user");
+		assert.match(tail.content[0].text, /<!-- pi-memory:ephemeral-recall -->/);
+		assert.match(tail.content[0].text, /<memory_recall/);
+		assert.match(tail.content[0].text, /Pi Memory Runtime/);
+
+		// 历史注入块先剥离再重挂：不随调用累积
+		const contextTwice = (await fire(
+			harness.handlers,
+			"context",
+			{ type: "context", messages: contextOnce.messages },
+			ctx,
+		)) as { messages: unknown[] };
+		assert.equal(contextTwice.messages.length, baseMessages.length + 1);
+		assert.match(
+			(contextTwice.messages.at(-1) as { content: Array<{ text: string }> }).content[0].text,
+			/<memory_recall/,
+		);
+
 		const search = harness.tools.get("memory_search");
 		assert.ok(search);
 		const result = await search.execute(
@@ -495,7 +530,7 @@ test("recalls indexed discrete memory from user input with routing, tools, and d
 			undefined,
 			ctx,
 		);
-		assert.match(result.content[0].text, /\.memory\/pi-memory-runtime\.md/);
+		assert.match(result.content[0].text, /.memory[\\/]pi-memory-runtime\.md/);
 		assert.equal(result.details.hits, 1);
 
 		await harness.commands.get("memory")?.("recall memory injection", ctx);
