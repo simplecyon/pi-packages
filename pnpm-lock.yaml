@@ -42,6 +42,18 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  packages/pi-cache-trace:
+    devDependencies:
+      '@earendil-works/pi-coding-agent':
+        specifier: 0.82.1
+        version: 0.82.1(ws@8.21.1)(zod@4.4.3)
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/pi-context-artifacts:
     dependencies:
       '@simplecyon/pi-context-core':
@@ -119,6 +131,10 @@ importers:
         version: 5.9.3
 
   packages/pi-memory:
+    dependencies:
+      typebox:
+        specifier: '>=1.1.38 <2.0.0'
+        version: 1.1.38
     devDependencies:
       '@earendil-works/pi-coding-agent':
         specifier: 0.82.1
@@ -184,6 +200,21 @@ importers:
       typebox:
         specifier: 1.1.38
         version: 1.1.38
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/pi-skill-anywhere:
+    devDependencies:
+      '@earendil-works/pi-coding-agent':
+        specifier: 0.82.1
+        version: 0.82.1(ws@8.21.1)(zod@4.4.3)
+      '@earendil-works/pi-tui':
+        specifier: 0.82.1
+        version: 0.82.1
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -259,6 +290,9 @@ packages:
   '@aws-sdk/core@3.977.1':
     resolution: {integrity: sha512-KVtQRtc00ES/y+Sc3vYXeP6pCIcNlBJCZOwvqSy8ZpVGmbM5+IG+AfhuTKQ2oXmIVqZJewaGMMpzPkywC6xg0w==}
     engines: {node: '>=20.0.0'}
+    deprecated: |-
+      Deprecated due to Document number parsing bug in JSON, see
+        https://github.com/aws/aws-sdk-js-v3/issues/8246. Newer version available.
 
   '@aws-sdk/credential-provider-env@3.972.62':
     resolution: {integrity: sha512-BkDrk2cNjed31IKin/Oksb2ziF+gfuyRskFVuT4EU9Mep7M8Y/d8DJG4+anHme4Vuse7CwaEscwEfGyR6mzBhQ==}
