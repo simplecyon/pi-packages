@@ -143,7 +143,8 @@ policy-compliant path remains, or when the user must supply a preference,
 authorization, or missing information. Technical uncertainty should trigger
 inspection, testing, or a safer alternative instead. `judge.auditSafeOps`
 defaults to `true`, so ordinary mutations are also reviewed; deterministic
-hard blocks never reach the model. Legacy `permissionMode: "ask" | "plan" |
+hard blocks never reach the model. Auto-mode writes always enter review, even
+when `auditSafeOps` is false; that option cannot bypass overwrite evidence checks. Legacy `permissionMode: "ask" | "plan" |
 "auto"` is read for compatibility (`ask` maps to `accept-edits`) but is no
 longer written.
 
@@ -168,7 +169,13 @@ the model. Use a bounded targeted edit instead. This also applies to explicitly
 authorized full replacements: the current review path requires a complete
 comparison. An observed missing file remains a creation. The judge must compare
 all changes against the user request; providing evidence does not itself prove
-that a model will correctly assess authorization.
+that a model will correctly assess authorization. Original content replaced by
+a secret-density redaction summary is unavailable evidence, not complete text.
+Reviewed write/edit proposals also fail closed locally when any proposed change
+is truncated or replaced by such a summary. Edit blocks are redacted before JSON
+encoding so exact string/newline boundaries and credential detection are preserved.
+File-supplied angle brackets are escaped inside the JSON audit envelope. Verdict
+parsing remains strict; empty or unrelated optional fields are not silently accepted.
 
 Only `allow` with `none` or `low` risk can execute. Missing/invalid fields,
 contradictory verdicts and unsupported probe names fail closed as `unavailable`.
@@ -185,6 +192,25 @@ suppression, not a semantic equivalent-action detector. The non-circumvention ru
 still applies to safety refusals. After a service failure, restore the service and
 resubmit for review; do not change tools to bypass it. Existing `onFailure` values
 remain readable for compatibility; neither opens a technical approval popup.
+
+## Live acceptance
+
+The opt-in `scripts/judge-live.mjs` runner uses synthetic temporary Git projects,
+real extension gates and real provider requests; it is not part of `npm test`.
+It never executes negative proposals. Each repetition creates a new session to
+avoid cached blocks. Host credentials stay in memory and the runner uses an
+isolated HOME/config without modifying the user's judge selection.
+
+```bash
+PI_LIVE_HOST_PACKAGE=/absolute/path/to/pi-coding-agent \
+  node scripts/judge-live.mjs --model wenge-main/deepreasoning-ds-v4flash \
+  --out /tmp/new-unique-judge-run --repeats 3
+```
+
+The output directory must not already exist. Raw calls, verdicts, file hashes,
+latency, source hashes and summaries are retained; treat failed expectations as
+an acceptance failure. See [the repeated live evaluation](docs/judge-live-2026-09-21.md)
+for measured results and limitations.
 
 ## Security boundary
 
