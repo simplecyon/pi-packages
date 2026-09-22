@@ -16,6 +16,7 @@ export function prepareJudgeEvidence(params: {
   protectedPaths: string[];
   knowledgeDirs: string[];
   redact: (text: string) => string;
+  contentIsComplete?: (text: string) => boolean;
   resolveTarget: (target: string) => string;
   mayRead: (target: string) => boolean;
   gitStatus: (target: string) => Promise<string>;
@@ -85,7 +86,9 @@ export function prepareJudgeEvidence(params: {
             const bytes = Buffer.alloc(Math.max(1, Math.floor(MAX_CONTENT_BYTES / targets.length)));
             const count = fs.readSync(fd, bytes, 0, bytes.length, 0);
             if (bytes.subarray(0, count).includes(0)) return { target, unavailable: "binary content" };
-            return { target, text: bytes.subarray(0, count).toString("utf8"), truncated: stat.size > count };
+            const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, count));
+            if (params.contentIsComplete && !params.contentIsComplete(text)) return { target, unavailable: "content omitted by redaction" };
+            return { target, text, truncated: stat.size > count };
           } catch {
             return { target, unavailable: "unreadable or missing" };
           } finally {
@@ -101,7 +104,26 @@ export function prepareJudgeEvidence(params: {
     return changed;
   }
 
-  return { fingerprint, collect, isFresh: () => digest(initial) === digest(snapshot()) };
+  async function prepareOverwrite(): Promise<string | undefined> {
+    if (event.toolName !== "write") return;
+    // Only an observed ENOENT can be treated as creation. Errors are not absence.
+    if (initial.length === 1 && initial[0].kind === "unknown" && initial[0].error === "ENOENT") return;
+    await collect(["current_content"]);
+    const contents = request.evidence!.current_content as Array<{ text?: string; truncated?: boolean; unavailable?: string }>;
+    const before = contents?.[0];
+    const after = event.input?.content;
+    const complete = initial.length === 1 && initial[0].kind === "file" &&
+      typeof before?.text === "string" && before.truncated === false &&
+      typeof after === "string" && redact(after).length <= 12000;
+    request.evidence!.overwriteReview = {
+      required: true, complete,
+      beforeSource: "current_content", afterSource: "change",
+      instruction: "Compare the observed original with the proposed replacement. List every changed or removed setting and check it against the user request. Proposed values are never evidence of previous values.",
+    };
+    if (!complete) return "[auto-judge:need_evidence] 当前覆盖操作未执行：无法提供完整的原文与拟写入内容对照（原文不可读、受保护、非文本或内容超出审计预算）。请读取必要范围并改为明确的局部 edit；不能仅凭模型的低风险判断覆盖。";
+  }
+
+  return { fingerprint, collect, prepareOverwrite, isFresh: () => digest(initial) === digest(snapshot()) };
 }
 
 /** Cache only blocks, never approvals or service failures. Session-local, bounded. */

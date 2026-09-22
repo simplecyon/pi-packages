@@ -154,10 +154,21 @@ change, and up to three recent user-message excerpts from the active session bra
 Excerpts are incomplete source evidence, not new authorization. Missing context
 must not be interpreted as approval. Paths, reasons and target lists are redacted
 along with content. Evidence probes cannot run model-supplied commands or read
-model-selected paths. Existing content is read only on request, from non-sensitive,
+model-selected paths. Existing content is collected automatically before reviewing a full overwrite of an
+existing file, and on request for other operations, from non-sensitive,
 non-protected regular files, with a total 16 KB read budget per review. Binary files
 and symlink leaves are not read. Truncation and unavailable facts remain explicit.
 Git status is an observation, not proof of recoverability.
+
+Full overwrites require complete original text and proposed content on the first
+judge request. If the original cannot be read, is binary, a symlink, sensitive,
+or exceeds the 16 KB read budget, or the proposed redacted content exceeds the
+12,000-character change budget, the operation is blocked locally without calling
+the model. Use a bounded targeted edit instead. This also applies to explicitly
+authorized full replacements: the current review path requires a complete
+comparison. An observed missing file remains a creation. The judge must compare
+all changes against the user request; providing evidence does not itself prove
+that a model will correctly assess authorization.
 
 Only `allow` with `none` or `low` risk can execute. Missing/invalid fields,
 contradictory verdicts and unsupported probe names fail closed as `unavailable`.

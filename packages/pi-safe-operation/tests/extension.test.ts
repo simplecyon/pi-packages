@@ -1347,7 +1347,7 @@ test("auto evidence flow reads the target and invalidates an in-flight approval"
     assert.match(payload, /file_state/);
     assert.match(payload, /git_status/);
     assert.match(payload, /Update only notes.txt/);
-    if (round === 1) return judgeVerdictResponse({ verdict: "need_evidence", riskLevel: "medium", rationale: "need original", evidenceNeeded: ["current_content"] });
+    assert.equal(round, 1); // Original is mandatory on the first request.
     assert.match(payload, /original notes/);
     fs.writeFileSync(path.join(tmp, "notes.txt"), "concurrent change");
     return judgeVerdictResponse({ verdict: "allow", riskLevel: "low", rationale: "ok" });
@@ -1362,7 +1362,7 @@ test("auto evidence flow reads the target and invalidates an in-flight approval"
     const result = await flaggedOverwrite(extension, ctx);
     assert.equal(result.block, true);
     assert.match(result.reason, /状态已变化/);
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 1);
   } finally { __setJudgeCompleteForTests(null); restoreHome(); fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
@@ -2024,4 +2024,104 @@ test("platform shortcut cycles chat → plan → accept-edits → auto with pers
     restoreHome();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test("incomplete proposals and lossy redaction never reach an always-allow judge", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-incomplete-proposal-"));
+  const restoreHome = withGlobalConfig({ interactionMode: "auto", judge: { provider: "test-provider", model: "j1" } });
+  const calls = installFakeJudge(async () => judgeVerdictResponse({ verdict: "allow", riskLevel: "low", rationale: "must not be used" }));
+  try {
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const ctx = autoTestContext(tmp, fakeJudgeRegistry().registry, []);
+    const heavy = JSON.stringify({ api_key: "synthetic-a".repeat(40), password: "synthetic-b".repeat(40), keep: true });
+    const events = [
+      { toolName: "write", input: { path: "heavy.json", content: heavy.replace(',"keep":true', '') } },
+      { toolName: "write", input: { path: "heavy.json", content: "{}" } },
+      { toolName: "edit", input: { path: "edits.txt", edits: [
+        { oldText: "a".repeat(6100), newText: "b".repeat(6100) },
+        { oldText: "keep=true", newText: "" },
+      ] } },
+      { toolName: "edit", input: { path: "heavy.json", edits: [{ oldText: heavy, newText: heavy.replace(',"keep":true', '') }] } },
+    ];
+    fs.writeFileSync(path.join(tmp, "heavy.json"), heavy);
+    fs.writeFileSync(path.join(tmp, "edits.txt"), "a".repeat(6100) + "\nkeep=true\n");
+    for (const event of events) {
+      const before = fs.readFileSync(path.join(tmp, event.input.path), "utf8");
+      const result = await extension.handlers.get("tool_call")![0]({ type: "tool_call", toolCallId: event.toolName + event.input.path, ...event }, ctx);
+      assert.equal(result?.block, true);
+      assert.match(result?.reason ?? "", /auto-judge:need_evidence/);
+      assert.equal(fs.readFileSync(path.join(tmp, event.input.path), "utf8"), before);
+    }
+    assert.equal(calls.length, 0);
+  } finally { __setJudgeCompleteForTests(null); restoreHome(); fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test("mandatory overwrite evidence cannot be disabled by auditSafeOps false", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-overwrite-no-audit-"));
+  const restoreHome = withGlobalConfig({ interactionMode: "auto", judge: { provider: "test-provider", model: "j1", auditSafeOps: false } });
+  const calls = installFakeJudge(async () => judgeVerdictResponse({ verdict: "allow", riskLevel: "low", rationale: "bounded full replacement" }));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: tmp });
+    fs.writeFileSync(path.join(tmp, "large.txt"), "x".repeat(16001));
+    fs.writeFileSync(path.join(tmp, "small.txt"), "old");
+    execFileSync("git", ["add", "--", "large.txt", "small.txt"], { cwd: tmp });
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const ctx = autoTestContext(tmp, fakeJudgeRegistry().registry, []);
+    const handler = extension.handlers.get("tool_call")![0];
+    const large = await handler({ type: "tool_call", toolCallId: "large", toolName: "write", input: { path: "large.txt", content: "new" } }, ctx);
+    assert.equal(large?.block, true);
+    assert.match(large?.reason ?? "", /auto-judge:need_evidence/);
+    assert.equal(calls.length, 0);
+    const small = await handler({ type: "tool_call", toolCallId: "small", toolName: "write", input: { path: "small.txt", content: "new" } }, ctx);
+    assert.equal(small, undefined);
+    assert.equal(calls.length, 1);
+  } finally { __setJudgeCompleteForTests(null); restoreHome(); fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test("full overwrite supplies original values before the first judge call", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-overwrite-original-"));
+  const restoreHome = withGlobalConfig({ permissionMode: "auto", judge: { provider: "test-provider", model: "j1" } });
+  const calls = installFakeJudge(async (call) => {
+    const text = call.context.messages[0].content[0].text as string;
+    const payload = JSON.parse(text.slice(text.indexOf("\n") + 1, text.indexOf("\n</untrusted-operation>")));
+    assert.equal(payload.evidence.overwriteReview.complete, true);
+    assert.equal(payload.evidence.current_content[0].text, "owner=Alice\nregion=US\n");
+    assert.equal(payload.change, "owner=Bob\nregion=CN\n");
+    return judgeVerdictResponse({ verdict: "adjust", riskLevel: "medium", rationale: "region changed US to CN", adjustment: "change owner only" });
+  });
+  try {
+    fs.writeFileSync(path.join(tmp, "notes.txt"), "owner=Alice\nregion=US\n");
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const result = await extension.handlers.get("tool_call")![0]({ type: "tool_call", toolName: "write", toolCallId: "hidden-change", input: { path: "notes.txt", content: "owner=Bob\nregion=CN\n" } }, autoTestContext(tmp, fakeJudgeRegistry().registry, []));
+    assert.equal(result.block, true);
+    assert.equal(calls.length, 1);
+  } finally { __setJudgeCompleteForTests(null); restoreHome(); fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test("incomplete overwrite evidence blocks locally even with an always-allow judge", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "safe-overwrite-incomplete-"));
+  const restoreHome = withGlobalConfig({ permissionMode: "auto", judge: { provider: "test-provider", model: "j1" } });
+  const calls = installFakeJudge(async () => judgeVerdictResponse({ verdict: "allow", riskLevel: "low", rationale: "unsupported claim" }));
+  try {
+    const extension = await loadSafeOperation(tmp);
+    await runSessionStart(extension, { type: "session_start", reason: "startup" }, baseContext(tmp, true));
+    const ctx = autoTestContext(tmp, fakeJudgeRegistry().registry, []);
+    for (const [name, original, proposed] of [
+      ["large.txt", "x".repeat(16001), "new"],
+      ["binary.txt", "abc\0def", "new"],
+      [".env", "TOKEN=value", "TOKEN=new"],
+      ["long-new.txt", "old", "y".repeat(12001)],
+    ]) {
+      fs.writeFileSync(path.join(tmp, name), original);
+      const result = await extension.handlers.get("tool_call")![0]({ type: "tool_call", toolName: "write", toolCallId: name, input: { path: name, content: proposed } }, ctx);
+      assert.equal(result.block, true);
+      assert.match(result.reason, /auto-judge:need_evidence/);
+      assert.match(result.reason, name === "long-new.txt" ? /拟修改内容被截断/ : /完整的原文/);
+      assert.equal(fs.readFileSync(path.join(tmp, name), "utf8"), original);
+    }
+    assert.equal(calls.length, 0);
+  } finally { __setJudgeCompleteForTests(null); restoreHome(); fs.rmSync(tmp, { recursive: true, force: true }); }
 });

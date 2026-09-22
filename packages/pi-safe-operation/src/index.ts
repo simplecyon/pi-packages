@@ -92,6 +92,8 @@ interface DeleteParse {
 }
 
 interface RedactionResult {
+  /** Entire content was replaced with a summary, losing comparison structure. */
+  contentOmitted?: boolean;
   text: string;
   count: number;
   redactedCharacters: number;
@@ -927,6 +929,7 @@ export default function (pi: ExtensionAPI) {
       const summary = [...kinds].sort().join(",") || "secret";
       return {
         text: `[pi-safe-operation blocked secret-heavy output: ${count} occurrence(s), kinds=${summary}]`,
+        contentOmitted: true,
         count,
         redactedCharacters: input.length,
         kinds,
@@ -1088,13 +1091,20 @@ export default function (pi: ExtensionAPI) {
       return declineReason;
     }
     if (config.interactionMode === "auto") {
-      const request = judgeRequestFromEvent(event, auditData, (text) => redactText(text).text);
+      const contentIsComplete = (text: string) => !redactText(text).contentOmitted;
+      const request = judgeRequestFromEvent(event, auditData, (text) => redactText(text).text, contentIsComplete);
+      if (request.changeComplete === false) {
+        blockedTotal += 1;
+        audit("blocked-incomplete-proposal", { tool: event.toolName });
+        return "[auto-judge:need_evidence] 当前操作未执行：拟修改内容被截断或脱敏摘要隐藏，无法审计全部变更。请缩小单次变更范围，保留全部修改块供审查；不能仅凭模型低风险判断执行。";
+      }
       const evidence = prepareJudgeEvidence({
         event, request, ctx,
         explicitTargets: Array.isArray(auditData.targets) ? auditData.targets.map(String) : [],
         protectedPaths: config.protectedPaths,
         knowledgeDirs: config.knowledgeDirs,
         redact: (text) => redactText(text).text,
+        contentIsComplete,
         resolveTarget: (target) => resolveRealTarget(target, ctx.cwd),
         mayRead: (target) => {
           const relative = normalizeRelative(path.relative(ctx.cwd, path.resolve(ctx.cwd, target)));
@@ -1107,6 +1117,12 @@ export default function (pi: ExtensionAPI) {
           return result.code === 0 ? result.stdout || "clean or ignored; recoverability not established" : "Git status unavailable";
         },
       });
+      const overwriteBlock = await evidence.prepareOverwrite();
+      if (overwriteBlock) {
+        blockedTotal += 1;
+        audit("blocked-incomplete-overwrite-evidence", { tool: event.toolName });
+        return overwriteBlock;
+      }
       await evidence.collect(["git_status"]);
       const cacheKey = crypto.createHash("sha256").update(evidence.fingerprint + JSON.stringify(request.evidence?.git_status) + JSON.stringify(config.judge)).digest("hex");
       const previous = judgeBlocks.get(cacheKey);
@@ -1366,7 +1382,9 @@ export default function (pi: ExtensionAPI) {
           if (status.code === 0 && status.stdout.trim()) reasons.push("target already has uncommitted changes");
         }
         if (reasons.length === 0) {
-          if (config.interactionMode === "auto" && config.judge.auditSafeOps) {
+          // Writes always need complete evidence; auditSafeOps may skip routine
+          // targeted edits, but cannot disable the overwrite boundary.
+          if (config.interactionMode === "auto" && (config.judge.auditSafeOps || event.toolName === "write")) {
             const safeVerdict = await adjudicate(
               ctx,
               "裁判审计：文件修改",
